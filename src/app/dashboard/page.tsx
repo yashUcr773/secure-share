@@ -5,12 +5,15 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Shield, Upload, FolderOpen, File, Share2, Trash2, Edit, Plus, Search } from "lucide-react";
+import { Shield, Upload, FolderOpen, File, Share2, Trash2, Edit, Plus, Search, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useRouter } from "next/navigation";
 
 export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
-  
-  // Mock data - in real app, this would come from your backend
+  const { user, logout, loading } = useAuth();
+  const router = useRouter();
+    // Mock data - in real app, this would come from your backend
   const [files] = useState([
     {
       id: "1",
@@ -44,6 +47,35 @@ export default function DashboardPage() {
     { id: "3", name: "Projects", fileCount: 12, created: "1 month ago" }
   ]);
 
+  const handleLogout = async () => {
+    await logout();
+    router.push("/");
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-2 text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground">Please log in to access your dashboard.</p>
+          <Button asChild className="mt-4">
+            <Link href="/auth/login">Login</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const copyShareLink = async (shareLink: string) => {
     await navigator.clipboard.writeText(shareLink);
     // TODO: Show toast notification
@@ -57,10 +89,15 @@ export default function DashboardPage() {
           <Link href="/" className="flex items-center gap-2">
             <Shield className="h-6 w-6 text-primary" />
             <span className="text-xl font-bold">SecureShare</span>
-          </Link>
-          <div className="flex items-center gap-4">
+          </Link>          <div className="flex items-center gap-4">
+            <span className="text-sm text-muted-foreground">
+              Welcome, {user.email}
+            </span>
             <Button variant="ghost">Settings</Button>
-            <Button variant="outline">Logout</Button>
+            <Button variant="outline" onClick={handleLogout}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
           </div>
         </div>
       </header>
