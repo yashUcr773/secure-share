@@ -2,17 +2,25 @@
 
 import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { Card, CardContent,  CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FolderOpen, Plus, Search, MoreHorizontal, FileText, Trash2 } from "lucide-react";
-import Link from "next/link";
+import { 
+  FolderOpen, 
+  Plus, 
+  Search, 
+  Filter, 
+  MoreHorizontal,
+  Trash2,
+  Edit3,
+  FolderPlus
+} from "lucide-react";
 
 interface Folder {
   id: string;
   name: string;
-  description?: string;
-  fileCount: number;
+  parentId: string | null;
+  userId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -21,42 +29,98 @@ export default function FoldersPage() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [editingFolder, setEditingFolder] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
 
   useEffect(() => {
-    // Simulate API call - replace with actual API
-    setTimeout(() => {
-      setFolders([
-        {
-          id: "1",
-          name: "Documents",
-          description: "Important documents and files",
-          fileCount: 12,
-          createdAt: "2024-01-15T10:00:00Z",
-          updatedAt: "2024-01-20T15:30:00Z",
-        },
-        {
-          id: "2",
-          name: "Projects",
-          description: "Project-related files and resources",
-          fileCount: 8,
-          createdAt: "2024-01-10T09:15:00Z",
-          updatedAt: "2024-01-18T14:20:00Z",
-        },
-        {
-          id: "3",
-          name: "Personal",
-          fileCount: 5,
-          createdAt: "2024-01-05T16:45:00Z",
-          updatedAt: "2024-01-12T11:10:00Z",
-        },
-      ]);
-      setLoading(false);
-    }, 1000);
+    fetchFolders();
   }, []);
 
+  const fetchFolders = async () => {
+    try {
+      const response = await fetch("/api/folders");
+      if (response.ok) {
+        const data = await response.json();
+        setFolders(data.folders || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch folders:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createFolder = async () => {
+    if (!newFolderName.trim()) return;
+
+    try {
+      const response = await fetch("/api/folders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: newFolderName.trim(),
+          parentId: null, // Root level for now
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setFolders([...folders, data.folder]);
+        setNewFolderName("");
+        setIsCreating(false);
+      }
+    } catch (error) {
+      console.error("Failed to create folder:", error);
+    }
+  };
+
+  const updateFolder = async (folderId: string, newName: string) => {
+    if (!newName.trim()) return;
+
+    try {
+      const response = await fetch(`/api/folders/${folderId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: newName.trim(),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setFolders(folders.map(f => f.id === folderId ? data.folder : f));
+        setEditingFolder(null);
+        setEditingName("");
+      }
+    } catch (error) {
+      console.error("Failed to update folder:", error);
+    }
+  };
+
+  const deleteFolder = async (folderId: string) => {
+    if (!confirm("Are you sure you want to delete this folder?")) return;
+
+    try {
+      const response = await fetch(`/api/folders/${folderId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setFolders(folders.filter(f => f.id !== folderId));
+      }
+    } catch (error) {
+      console.error("Failed to delete folder:", error);
+    }
+  };
+
   const filteredFolders = folders.filter(folder =>
-    folder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    folder.description?.toLowerCase().includes(searchTerm.toLowerCase())
+    folder.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const formatDate = (dateString: string) => {
@@ -64,22 +128,10 @@ export default function FoldersPage() {
       year: "numeric",
       month: "short",
       day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
-
-  const handleDeleteFolder = async (folderId: string) => {
-    if (!confirm("Are you sure you want to delete this folder? This action cannot be undone.")) {
-      return;
-    }
-    
-    try {
-      // Replace with actual API call
-      setFolders(folders.filter(f => f.id !== folderId));
-    } catch (error) {
-      console.error("Failed to delete folder:", error);
-    }
-  };
-
   if (loading) {
     return (
       <DashboardLayout>
@@ -95,28 +147,72 @@ export default function FoldersPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Folders</h1>
+            <h1 className="text-3xl font-bold">My Folders</h1>
             <p className="text-muted-foreground">
-              Organize your files into folders for better management
+              Organize your files with folders
             </p>
           </div>
-          <Button asChild>
-            <Link href="/dashboard/folders/new">
-              <Plus className="h-4 w-4 mr-2" />
-              New Folder
-            </Link>
+          <Button 
+            onClick={() => setIsCreating(true)}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            New Folder
           </Button>
         </div>
 
+        {/* Create New Folder */}
+        {isCreating && (
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <FolderPlus className="h-6 w-6 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <Input
+                    placeholder="Folder name"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && createFolder()}
+                    autoFocus
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={createFolder} size="sm">
+                    Create
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      setIsCreating(false);
+                      setNewFolderName("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Search Bar */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search folders..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search folders..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Button variant="outline" size="sm">
+            <Filter className="h-4 w-4 mr-2" />
+            Filter
+          </Button>
         </div>
 
         {/* Folders Grid */}
@@ -126,57 +222,73 @@ export default function FoldersPage() {
               <FolderOpen className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No folders found</h3>
               <p className="text-muted-foreground text-center mb-4">
-                {searchTerm 
-                  ? "Try adjusting your search terms" 
-                  : "Create your first folder to organize your files"
-                }
+                {searchTerm ? "Try adjusting your search terms" : "Create your first folder to organize your files"}
               </p>
-              <Button asChild>
-                <Link href="/dashboard/folders/new">Create Folder</Link>
+              <Button onClick={() => setIsCreating(true)}>
+                Create Folder
               </Button>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid gap-4">
             {filteredFolders.map((folder) => (
-              <Card key={folder.id} className="hover:shadow-md transition-shadow cursor-pointer">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
+              <Card key={folder.id} className="hover:shadow-md transition-shadow">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4 flex-1">
                       <div className="p-2 bg-primary/10 rounded-lg">
                         <FolderOpen className="h-6 w-6 text-primary" />
                       </div>
-                      <div>
-                        <CardTitle className="text-lg">{folder.name}</CardTitle>
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <FileText className="h-3 w-3" />
-                          {folder.fileCount} files
-                        </div>
+                      <div className="flex-1 min-w-0">
+                        {editingFolder === folder.id ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={editingName}
+                              onChange={(e) => setEditingName(e.target.value)}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') {
+                                  updateFolder(folder.id, editingName);
+                                }
+                              }}
+                              onBlur={() => updateFolder(folder.id, editingName)}
+                              autoFocus
+                              className="h-8"
+                            />
+                          </div>
+                        ) : (
+                          <>
+                            <h3 className="font-semibold truncate">{folder.name}</h3>
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                              <span>Created {formatDate(folder.createdAt)}</span>
+                              {folder.updatedAt !== folder.createdAt && (
+                                <span>Updated {formatDate(folder.updatedAt)}</span>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
+                    
                     <div className="flex gap-1">
-                      <Button size="sm" variant="ghost">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  {folder.description && (
-                    <p className="text-sm text-muted-foreground mb-3">
-                      {folder.description}
-                    </p>
-                  )}
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Created {formatDate(folder.createdAt)}</span>
-                    <div className="flex gap-2">
                       <Button 
                         size="sm" 
                         variant="ghost"
-                        className="h-8 px-2"
-                        onClick={() => handleDeleteFolder(folder.id)}
+                        onClick={() => {
+                          setEditingFolder(folder.id);
+                          setEditingName(folder.name);
+                        }}
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Edit3 className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="ghost"
+                        onClick={() => deleteFolder(folder.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost">
+                        <MoreHorizontal className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>

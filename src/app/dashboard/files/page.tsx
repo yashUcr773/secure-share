@@ -12,7 +12,7 @@ interface FileItem {
   id: string;
   fileName: string;
   createdAt: string;
-  size: number;
+  fileSize: number;
   isPasswordProtected: boolean;
   shares: number;
   downloads: number;
@@ -51,7 +51,7 @@ export default function FilesPage() {
         case "name":
           return a.fileName.localeCompare(b.fileName);
         case "size":
-          return b.size - a.size;
+          return b.fileSize - a.fileSize;
         case "date":
         default:
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -168,7 +168,7 @@ export default function FilesPage() {
                         <h3 className="font-semibold truncate">{file.fileName}</h3>
                         <div className="flex items-center gap-4 text-sm text-muted-foreground">
                           <span>{formatDate(file.createdAt)}</span>
-                          <span>{formatFileSize(file.size)}</span>
+                          <span>{formatFileSize(file.fileSize)}</span>
                           {file.isPasswordProtected && (
                             <span className="flex items-center gap-1">
                               <FileText className="h-3 w-3" />

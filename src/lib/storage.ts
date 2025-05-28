@@ -4,6 +4,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { config } from './config';
+import { randomUUID } from 'crypto';
 
 export interface StoredFile {
   id: string;
@@ -19,10 +20,21 @@ export interface StoredFile {
   userId?: string; // For future authentication
 }
 
+export interface Folder {
+  id: string;
+  name: string;
+  parentId: string | null; // null for root folders
+  userId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class FileStorage {
   private static readonly STORAGE_DIR = path.resolve(config.storageDir);
   private static readonly FILES_DIR = path.join(this.STORAGE_DIR, 'files');
   private static readonly INDEX_FILE = path.join(this.STORAGE_DIR, 'index.json');
+  private static readonly FOLDERS_DIR = path.join(this.STORAGE_DIR, 'folders');
+  private static readonly FOLDERS_INDEX_FILE = path.join(this.STORAGE_DIR, 'folders_index.json');
 
   /**
    * Initialize storage directories
@@ -31,12 +43,18 @@ export class FileStorage {
     try {
       await fs.mkdir(this.STORAGE_DIR, { recursive: true });
       await fs.mkdir(this.FILES_DIR, { recursive: true });
+      await fs.mkdir(this.FOLDERS_DIR, { recursive: true });
       
-      // Create index file if it doesn't exist
+      // Create index files if they don't exist
       try {
         await fs.access(this.INDEX_FILE);
       } catch {
         await fs.writeFile(this.INDEX_FILE, JSON.stringify({}));
+      }
+      try {
+        await fs.access(this.FOLDERS_INDEX_FILE);
+      } catch {
+        await fs.writeFile(this.FOLDERS_INDEX_FILE, JSON.stringify({}));
       }
     } catch (error) {
       console.error('Failed to initialize storage:', error);
@@ -106,7 +124,6 @@ export class FileStorage {
     const { ...metadata } = file;
     return metadata;
   }
-
   /**
    * Get all files for a user (for dashboard)
    */
@@ -121,7 +138,8 @@ export class FileStorage {
 
       for (const [fileId, metadata] of Object.entries(index)) {
         const fileMeta = metadata as StoredFile;
-        if (fileMeta.userId === userId) {
+        // Include files that belong to the user OR files without a userId (backward compatibility)
+        if (fileMeta.userId === userId || (!fileMeta.userId && userId === 'anonymous')) {
           const fullFile = await this.getFile(fileId);
           if (fullFile) {
             const { ...meta } = fullFile;
@@ -285,7 +303,144 @@ export class FileStorage {
         totalSize: 0,
         oldestFile: null,
         newestFile: null,
-      };
+      };    }
+  }
+
+  /**
+   * Create a new folder
+   */
+  static async createFolder(folderData: Omit<Folder, 'id' | 'createdAt' | 'updatedAt'>): Promise<Folder> {
+    await this.init();
+
+    const folder: Folder = {
+      ...folderData,
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      const foldersIndexPath = path.join(this.STORAGE_DIR, 'folders-index.json');
+      
+      // Read existing folders index
+      let foldersIndex: { folders: Record<string, Folder> } = { folders: {} };
+      try {
+        const indexContent = await fs.readFile(foldersIndexPath, 'utf-8');
+        foldersIndex = JSON.parse(indexContent);
+      } catch (error) {
+        console.warn('Folders index file not found, creating new one', error);
+        // File doesn't exist, use empty index
+      }
+
+      // Add new folder
+      foldersIndex.folders[folder.id] = folder;
+
+      // Save updated index
+      await fs.writeFile(foldersIndexPath, JSON.stringify(foldersIndex, null, 2));
+
+      console.log(`Folder ${folder.id} created successfully`);
+      return folder;
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      throw new Error('Folder creation failed');
+    }
+  }
+
+  /**
+   * Get all folders for a user
+   */
+  static async getUserFolders(userId: string): Promise<Folder[]> {
+    await this.init();
+
+    try {
+      const foldersIndexPath = path.join(this.STORAGE_DIR, 'folders-index.json');
+      
+      try {
+        const indexContent = await fs.readFile(foldersIndexPath, 'utf-8');
+        const foldersIndex: { folders: Record<string, Folder> } = JSON.parse(indexContent);
+        
+        return Object.values(foldersIndex.folders)
+          .filter(folder => folder.userId === userId || (!folder.userId && userId === 'anonymous'))
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      } catch (error) {
+        console.warn('Folders index file not found', error);
+        return [];
+      }
+    } catch (error) {
+      console.error('Failed to get user folders:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get a specific folder by ID
+   */
+  static async getFolder(folderId: string): Promise<Folder | null> {
+    await this.init();
+
+    try {
+      const foldersIndexPath = path.join(this.STORAGE_DIR, 'folders-index.json');
+      const indexContent = await fs.readFile(foldersIndexPath, 'utf-8');
+      const foldersIndex: { folders: Record<string, Folder> } = JSON.parse(indexContent);
+      
+      return foldersIndex.folders[folderId] || null;
+    } catch (error) {
+      console.error('Failed to get folder:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update a folder
+   */
+  static async updateFolder(folderId: string, updates: Partial<Pick<Folder, 'name' | 'parentId'>>): Promise<Folder | null> {
+    await this.init();
+
+    try {
+      const foldersIndexPath = path.join(this.STORAGE_DIR, 'folders-index.json');
+      const indexContent = await fs.readFile(foldersIndexPath, 'utf-8');
+      const foldersIndex: { folders: Record<string, Folder> } = JSON.parse(indexContent);
+      
+      if (foldersIndex.folders[folderId]) {
+        foldersIndex.folders[folderId] = {
+          ...foldersIndex.folders[folderId],
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        };
+
+        await fs.writeFile(foldersIndexPath, JSON.stringify(foldersIndex, null, 2));
+        return foldersIndex.folders[folderId];
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Failed to update folder:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete a folder
+   */
+  static async deleteFolder(folderId: string): Promise<boolean> {
+    await this.init();
+
+    try {
+      const foldersIndexPath = path.join(this.STORAGE_DIR, 'folders-index.json');
+      const indexContent = await fs.readFile(foldersIndexPath, 'utf-8');
+      const foldersIndex: { folders: Record<string, Folder> } = JSON.parse(indexContent);
+      
+      if (foldersIndex.folders[folderId]) {
+        delete foldersIndex.folders[folderId];
+        await fs.writeFile(foldersIndexPath, JSON.stringify(foldersIndex, null, 2));
+        console.log(`Folder ${folderId} deleted successfully`);
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      return false;
     }
   }
 }

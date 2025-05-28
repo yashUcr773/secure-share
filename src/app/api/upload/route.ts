@@ -21,9 +21,7 @@ export async function POST(request: NextRequest) {
         { error: 'Missing required fields' },
         { status: 400 }
       );
-    }
-
-    // Prepare file data for storage
+    }    // Prepare file data for storage
     const fileData = {
       id: shareId,
       fileName,
@@ -34,8 +32,8 @@ export async function POST(request: NextRequest) {
       key: isPasswordProtected ? null : key, // Don't store key if password protected
       isPasswordProtected,
       createdAt: new Date().toISOString(),
-      // In real app, you'd also store user ID if authenticated
-      // userId: req.user?.id
+      // TODO: Get user ID from authentication - for now use 'anonymous'
+      userId: 'anonymous',
     };
 
     // Save to persistent storage
