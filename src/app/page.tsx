@@ -1,54 +1,14 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { Header } from "@/components/Header";
 import Link from "next/link";
-import { Upload, Shield, Share2, FolderOpen, Lock, Eye, LogOut } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
+import { Upload, Shield, Share2, FolderOpen, Lock, Eye } from "lucide-react";
 
 export default function Home() {
-  const { user, logout, loading } = useAuth();
-
-  const handleLogout = async () => {
-    await logout();
-  };
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      {/* Header */}
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Shield className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold">SecureShare</span>
-          </div>
-          <div className="flex items-center gap-4">
-            {loading ? (
-              <div className="w-20 h-9 bg-muted animate-pulse rounded"></div>
-            ) : user ? (
-              <>
-                <span className="text-sm text-muted-foreground">
-                  Welcome, {user.email}
-                </span>
-                <Button variant="ghost" asChild>
-                  <Link href="/dashboard">Dashboard</Link>
-                </Button>
-                <Button variant="ghost" onClick={handleLogout}>
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Logout
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button variant="ghost" asChild>
-                  <Link href="/auth/login">Login</Link>
-                </Button>
-                <Button asChild>
-                  <Link href="/auth/signup">Sign Up</Link>
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
+      <Header />
 
       {/* Hero Section */}
       <main className="container mx-auto px-4 py-16">

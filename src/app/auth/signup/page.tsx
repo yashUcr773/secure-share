@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Header } from "@/components/Header";
 import { Shield, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -42,10 +43,11 @@ export default function SignupPage() {
       setIsLoading(false);
     }
   };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
+    <div className="min-h-screen bg-gradient-to-br from-background to-muted">
+      <Header />
+      <div className="flex items-center justify-center p-4 pt-16">
+        <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex items-center justify-center gap-2 mb-4">
             <Shield className="h-8 w-8 text-primary" />
@@ -138,10 +140,10 @@ export default function SignupPage() {
               <Link href="/auth/login" className="text-primary hover:underline">
                 Sign in
               </Link>
-            </p>
-          </CardFooter>
+            </p>          </CardFooter>
         </form>
       </Card>
+      </div>
     </div>
   );
 }

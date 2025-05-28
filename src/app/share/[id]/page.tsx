@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Shield, Lock, Eye, EyeOff, Download, Copy, Check } from "lucide-react";
+import { Lock, Eye, EyeOff, Download, Copy, Check } from "lucide-react";
 import { FileEncryption } from "@/lib/crypto";
+import { Header } from "@/components/Header";
 
 export default function SharePage() {
   const params = useParams();
@@ -120,41 +121,26 @@ export default function SharePage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
   if (isLoading && !isDecrypted) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-background to-muted flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-6">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-              <p>Loading file...</p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gradient-to-br from-background to-muted">
+        <Header />
+        <div className="flex items-center justify-center min-h-screen">
+          <Card className="w-full max-w-md">
+            <CardContent className="p-6">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                <p>Loading file...</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      {/* Header */}
-      <header className="border-b bg-background/95 backdrop-blur">
-        <div className="container flex h-16 items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <Shield className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold">SecureShare</span>
-          </Link>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" asChild>
-              <Link href="/auth/login">Login</Link>
-            </Button>
-            <Button asChild>
-              <Link href="/auth/signup">Sign Up</Link>
-            </Button>
-          </div>
-        </div>
-      </header>
+      <Header />
 
       <main className="container mx-auto px-4 py-16">
         <div className="max-w-4xl mx-auto">
