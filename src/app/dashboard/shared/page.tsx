@@ -29,49 +29,26 @@ export default function SharedLinksPage() {
   useEffect(() => {
     fetchSharedLinks();
   }, []);
-
   const fetchSharedLinks = async () => {
     try {
-      // Simulate API call - replace with actual API
-      setTimeout(() => {
-        setSharedLinks([
-          {
-            id: "1",
-            fileName: "project-proposal.txt",
-            shareUrl: `${window.location.origin}/share/abc123`,
-            createdAt: "2024-01-15T10:00:00Z",
-            expiresAt: "2024-02-15T10:00:00Z",
-            views: 25,
-            downloads: 8,
-            isPasswordProtected: true,
-            isActive: true,
-          },
-          {
-            id: "2",
-            fileName: "meeting-notes.txt",
-            shareUrl: `${window.location.origin}/share/def456`,
-            createdAt: "2024-01-10T14:30:00Z",
-            views: 12,
-            downloads: 3,
-            isPasswordProtected: false,
-            isActive: true,
-          },
-          {
-            id: "3",
-            fileName: "expired-document.txt",
-            shareUrl: `${window.location.origin}/share/ghi789`,
-            createdAt: "2023-12-01T09:15:00Z",
-            expiresAt: "2023-12-31T23:59:59Z",
-            views: 45,
-            downloads: 15,
-            isPasswordProtected: true,
-            isActive: false,
-          },
-        ]);
-        setLoading(false);
-      }, 1000);
+      const response = await fetch('/api/dashboard/shared');
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch shared links');
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setSharedLinks(data.sharedLinks);
+      } else {
+        throw new Error(data.error || 'Failed to fetch shared links');
+      }
+      
+      setLoading(false);
     } catch (error) {
       console.error("Failed to fetch shared links:", error);
+      setSharedLinks([]);
       setLoading(false);
     }
   };
@@ -99,15 +76,29 @@ export default function SharedLinksPage() {
       console.error("Failed to copy to clipboard:", error);
     }
   };
-
   const handleDelete = async (linkId: string) => {
     if (!confirm("Are you sure you want to delete this shared link?")) return;
     
     try {
-      // Replace with actual API call
-      setSharedLinks(sharedLinks.filter(l => l.id !== linkId));
+      const response = await fetch(`/api/dashboard/shared?id=${linkId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete shared link');
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        // Remove from local state
+        setSharedLinks(sharedLinks.filter(l => l.id !== linkId));
+      } else {
+        throw new Error(data.error || 'Failed to delete shared link');
+      }
     } catch (error) {
       console.error("Failed to delete shared link:", error);
+      alert("Failed to delete shared link. Please try again.");
     }
   };
 

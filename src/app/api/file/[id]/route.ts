@@ -22,7 +22,8 @@ export async function GET(
         { error: 'File not found' },
         { status: 404 }
       );
-    }
+    }    // Update view count for shared link analytics
+    await FileStorage.updateSharedLinkAnalytics(fileId, 'view');
 
     // Return file metadata (without the actual encrypted content for security)
     const response = {
@@ -72,15 +73,16 @@ export async function POST(
         { error: 'File not found' },
         { status: 404 }
       );
-    }
-
-    // If password protected, validate password (in real app, you'd verify against hash)
+    }    // If password protected, validate password (in real app, you'd verify against hash)
     if (fileData.isPasswordProtected && !password) {
       return NextResponse.json(
         { error: 'Password required' },
         { status: 401 }
       );
     }
+
+    // Update download count for shared link analytics when content is accessed
+    await FileStorage.updateSharedLinkAnalytics(fileId, 'download');
 
     // Return the encrypted content for client-side decryption
     return NextResponse.json({

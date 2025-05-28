@@ -29,12 +29,26 @@ export interface Folder {
   updatedAt: string;
 }
 
+export interface SharedLink {
+  id: string;
+  fileName: string;
+  shareUrl: string;
+  createdAt: string;
+  expiresAt?: string;
+  views: number;
+  downloads: number;
+  isPasswordProtected: boolean;
+  isActive: boolean;
+  userId?: string;
+}
+
 export class FileStorage {
   private static readonly STORAGE_DIR = path.resolve(config.storageDir);
   private static readonly FILES_DIR = path.join(this.STORAGE_DIR, 'files');
   private static readonly INDEX_FILE = path.join(this.STORAGE_DIR, 'index.json');
   private static readonly FOLDERS_DIR = path.join(this.STORAGE_DIR, 'folders');
   private static readonly FOLDERS_INDEX_FILE = path.join(this.STORAGE_DIR, 'folders_index.json');
+  private static readonly SHARED_LINKS_INDEX_FILE = path.join(this.STORAGE_DIR, 'shared_links.json');
 
   /**
    * Initialize storage directories
@@ -50,11 +64,17 @@ export class FileStorage {
         await fs.access(this.INDEX_FILE);
       } catch {
         await fs.writeFile(this.INDEX_FILE, JSON.stringify({}));
-      }
-      try {
+      }      try {
         await fs.access(this.FOLDERS_INDEX_FILE);
       } catch {
         await fs.writeFile(this.FOLDERS_INDEX_FILE, JSON.stringify({}));
+      }
+      
+      // Create shared links index if it doesn't exist
+      try {
+        await fs.access(this.SHARED_LINKS_INDEX_FILE);
+      } catch {
+        await fs.writeFile(this.SHARED_LINKS_INDEX_FILE, JSON.stringify({}));
       }
     } catch (error) {
       console.error('Failed to initialize storage:', error);
@@ -418,7 +438,6 @@ export class FileStorage {
       return null;
     }
   }
-
   /**
    * Delete a folder
    */
@@ -442,5 +461,159 @@ export class FileStorage {
       console.error('Failed to delete folder:', error);
       return false;
     }
+  }
+
+  /**
+   * Create a new shared link for a file
+   */
+  static async createSharedLink(fileId: string, userId?: string, expiresAt?: string): Promise<SharedLink | null> {
+    await this.init();
+
+    // Check if file exists
+    const file = await this.getFile(fileId);
+    if (!file) {
+      throw new Error('File not found');
+    }
+
+    const sharedLink: SharedLink = {
+      id: fileId, // Use file ID as share link ID
+      fileName: file.fileName,
+      shareUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/share/${fileId}`,
+      createdAt: new Date().toISOString(),
+      expiresAt,
+      views: 0,
+      downloads: 0,
+      isPasswordProtected: file.isPasswordProtected,
+      isActive: true,
+      userId: userId || file.userId,
+    };
+
+    try {
+      const indexContent = await fs.readFile(this.SHARED_LINKS_INDEX_FILE, 'utf-8');
+      const index = JSON.parse(indexContent);
+      
+      index[fileId] = sharedLink;
+      
+      await fs.writeFile(this.SHARED_LINKS_INDEX_FILE, JSON.stringify(index, null, 2));
+      
+      console.log(`Shared link created for file ${fileId}`);
+      return sharedLink;
+    } catch (error) {
+      console.error('Failed to create shared link:', error);
+      throw new Error('Shared link creation failed');
+    }
+  }
+
+  /**
+   * Get all shared links for a user
+   */
+  static async getUserSharedLinks(userId: string): Promise<SharedLink[]> {
+    await this.init();
+
+    try {
+      const indexContent = await fs.readFile(this.SHARED_LINKS_INDEX_FILE, 'utf-8');
+      const index = JSON.parse(indexContent);
+
+      const userLinks: SharedLink[] = [];
+
+      for (const [fileId, linkData] of Object.entries(index)) {
+        console.log("🚀 ~ FileStorage ~ getUserSharedLinks ~ fileId:", fileId)
+        const link = linkData as SharedLink;
+        // Include links that belong to the user OR links without a userId (backward compatibility)
+        if (link.userId === userId || (!link.userId && userId === 'anonymous')) {
+          userLinks.push(link);
+        }
+      }
+
+      return userLinks.sort((a, b) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    } catch (error) {
+      console.error('Failed to get user shared links:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get a specific shared link
+   */
+  static async getSharedLink(fileId: string): Promise<SharedLink | null> {
+    await this.init();
+
+    try {
+      const indexContent = await fs.readFile(this.SHARED_LINKS_INDEX_FILE, 'utf-8');
+      const index = JSON.parse(indexContent);
+      
+      return index[fileId] || null;
+    } catch (error) {
+      console.error('Failed to get shared link:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update shared link analytics (views/downloads)
+   */
+  static async updateSharedLinkAnalytics(fileId: string, type: 'view' | 'download'): Promise<void> {
+    await this.init();
+
+    try {
+      const indexContent = await fs.readFile(this.SHARED_LINKS_INDEX_FILE, 'utf-8');
+      const index = JSON.parse(indexContent);
+      
+      if (index[fileId]) {
+        if (type === 'view') {
+          index[fileId].views = (index[fileId].views || 0) + 1;
+        } else if (type === 'download') {
+          index[fileId].downloads = (index[fileId].downloads || 0) + 1;
+        }
+        
+        await fs.writeFile(this.SHARED_LINKS_INDEX_FILE, JSON.stringify(index, null, 2));
+        console.log(`Updated ${type} count for shared link ${fileId}`);
+      }
+    } catch (error) {
+      console.error('Failed to update shared link analytics:', error);
+    }
+  }
+
+  /**
+   * Delete a shared link
+   */
+  static async deleteSharedLink(fileId: string): Promise<boolean> {
+    await this.init();
+
+    try {
+      const indexContent = await fs.readFile(this.SHARED_LINKS_INDEX_FILE, 'utf-8');
+      const index = JSON.parse(indexContent);
+      
+      if (index[fileId]) {
+        delete index[fileId];
+        await fs.writeFile(this.SHARED_LINKS_INDEX_FILE, JSON.stringify(index, null, 2));
+        console.log(`Shared link ${fileId} deleted successfully`);
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Failed to delete shared link:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if a shared link is valid and active
+   */
+  static async isSharedLinkValid(fileId: string): Promise<boolean> {
+    const link = await this.getSharedLink(fileId);
+    if (!link || !link.isActive) {
+      return false;
+    }
+
+    // Check if expired
+    if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+      return false;
+    }
+
+    return true;
   }
 }
