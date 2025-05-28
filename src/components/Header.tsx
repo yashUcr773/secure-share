@@ -41,9 +41,10 @@ export function Header() {
                 <div className="flex items-center gap-2 px-3 py-1 rounded-md bg-muted">
                   <User className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm font-medium">{user.email}</span>
-                </div>
-                <Button variant="ghost" size="sm">
-                  <Settings className="h-4 w-4" />
+                </div>                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/dashboard/settings">
+                    <Settings className="h-4 w-4" />
+                  </Link>
                 </Button>
                 <Button variant="ghost" size="sm" onClick={handleLogout}>
                   <LogOut className="h-4 w-4" />

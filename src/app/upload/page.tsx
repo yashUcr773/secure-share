@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload, Shield, Lock, Eye, EyeOff, Copy, Check } from "lucide-react";
+import { Upload, Lock, Eye, EyeOff, Copy, Check } from "lucide-react";
 import { FileEncryption } from "@/lib/crypto";
-import { Header } from "@/components/Header";
+import { DashboardLayout } from "@/components/DashboardLayout";
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -123,177 +123,157 @@ export default function UploadPage() {
       fileInputRef.current.value = "";
     }
   };
-
   if (shareLink) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-        {/* Header */}
-        <header className="border-b bg-background/95 backdrop-blur">
-          <div className="container flex h-16 items-center justify-between">
-            <Link href="/" className="flex items-center gap-2">
-              <Shield className="h-6 w-6 text-primary" />
-              <span className="text-xl font-bold">SecureShare</span>
-            </Link>
-          </div>
-        </header>
-
-        {/* Success Page */}
-        <main className="container mx-auto px-4 py-16">
-          <div className="max-w-2xl mx-auto text-center space-y-8">
-            <div className="space-y-4">
-              <div className="bg-green-100 dark:bg-green-900/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
-                <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
-              </div>
-              <h1 className="text-3xl font-bold">File Shared Successfully!</h1>
-              <p className="text-muted-foreground">
-                Your file has been encrypted and uploaded. Share this link with anyone.
-              </p>
+      <DashboardLayout>
+        <div className="max-w-2xl mx-auto text-center space-y-8">
+          <div className="space-y-4">
+            <div className="bg-green-100 dark:bg-green-900/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+              <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
             </div>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">Your Share Link</CardTitle>
-                <CardDescription>
-                  This link will allow others to access your encrypted file
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-2">
-                  <Input value={shareLink} readOnly />
-                  <Button onClick={copyToClipboard} variant="outline">
-                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <div className="flex gap-4 justify-center">
-                  <Button onClick={resetForm} variant="outline">
-                    Share Another File
-                  </Button>
-                  <Button asChild>
-                    <Link href="/dashboard">Go to Dashboard</Link>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </main>
-      </div>
-    );
-  }
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      <Header />
-
-      {/* Upload Section */}
-      <main className="container mx-auto px-4 py-16">
-        <div className="max-w-2xl mx-auto space-y-8">
-          <div className="text-center space-y-4">
-            <h1 className="text-3xl font-bold">Upload & Share</h1>
+            <h1 className="text-3xl font-bold">File Shared Successfully!</h1>
             <p className="text-muted-foreground">
-              Encrypt your files locally and share them securely
+              Your file has been encrypted and uploaded. Share this link with anyone.
             </p>
           </div>
 
           <Card>
             <CardHeader>
-              <CardTitle>Select File or Paste Text</CardTitle>
+              <CardTitle className="text-xl">Your Share Link</CardTitle>
               <CardDescription>
-                Files are encrypted in your browser before upload
+                This link will allow others to access your encrypted file
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* File Upload Area */}
-              <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
-                  isDragging 
-                    ? "border-primary bg-primary/5" 
-                    : "border-muted-foreground/25 hover:border-primary/50"
-                }`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-lg font-medium">
-                  {file ? file.name : "Drop files here or click to upload"}
-                </p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Text files up to 2MB • Encrypted in your browser
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  accept=".txt,.md,.json,.csv,.xml,.log"
-                  onChange={handleFileSelect}
-                />
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={shareLink} readOnly />
+                <Button onClick={copyToClipboard} variant="outline">
+                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
               </div>
-
-              {/* Text Content Area */}
-              <div className="space-y-2">
-                <Label htmlFor="content">Or paste your text content</Label>
-                <textarea
-                  id="content"
-                  className="w-full h-32 px-3 py-2 border border-input bg-background rounded-md text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  placeholder="Paste your text here..."
-                  value={textContent}
-                  onChange={(e) => setTextContent(e.target.value)}
-                />
+              <div className="flex gap-4 justify-center">
+                <Button onClick={resetForm} variant="outline">
+                  Share Another File
+                </Button>
+                <Button asChild>
+                  <Link href="/dashboard">Go to Dashboard</Link>
+                </Button>
               </div>
-
-              {/* Password Protection */}
-              <div className="space-y-2">
-                <Label htmlFor="password">Password Protection (Optional)</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Enter a password to encrypt the file"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  If no password is provided, a random encryption key will be generated
-                </p>
-              </div>
-
-              {/* Upload Button */}
-              <Button 
-                onClick={handleUpload} 
-                className="w-full" 
-                size="lg"
-                disabled={(!file && !textContent.trim()) || isUploading}
-              >
-                {isUploading ? (
-                  <>
-                    <Upload className="h-4 w-4 mr-2 animate-spin" />
-                    Encrypting & Uploading...
-                  </>
-                ) : (
-                  <>
-                    <Lock className="h-4 w-4 mr-2" />
-                    Encrypt & Share
-                  </>
-                )}
-              </Button>
             </CardContent>
           </Card>
         </div>
-      </main>
-    </div>
+      </DashboardLayout>
+    );
+  }return (
+    <DashboardLayout>
+      <div className="max-w-2xl mx-auto space-y-8">
+        <div className="text-center space-y-4">
+          <h1 className="text-3xl font-bold">Upload & Share</h1>
+          <p className="text-muted-foreground">
+            Encrypt your files locally and share them securely
+          </p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Select File or Paste Text</CardTitle>
+            <CardDescription>
+              Files are encrypted in your browser before upload
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* File Upload Area */}
+            <div
+              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
+                isDragging 
+                  ? "border-primary bg-primary/5" 
+                  : "border-muted-foreground/25 hover:border-primary/50"
+              }`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+              <p className="text-lg font-medium">
+                {file ? file.name : "Drop files here or click to upload"}
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Text files up to 2MB • Encrypted in your browser
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".txt,.md,.json,.csv,.xml,.log"
+                onChange={handleFileSelect}
+              />
+            </div>
+
+            {/* Text Content Area */}
+            <div className="space-y-2">
+              <Label htmlFor="content">Or paste your text content</Label>
+              <textarea
+                id="content"
+                className="w-full h-32 px-3 py-2 border border-input bg-background rounded-md text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="Paste your text here..."
+                value={textContent}
+                onChange={(e) => setTextContent(e.target.value)}
+              />
+            </div>
+
+            {/* Password Protection */}
+            <div className="space-y-2">
+              <Label htmlFor="password">Password Protection (Optional)</Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter a password to encrypt the file"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                If no password is provided, a random encryption key will be generated
+              </p>
+            </div>
+
+            {/* Upload Button */}
+            <Button 
+              onClick={handleUpload} 
+              className="w-full" 
+              size="lg"
+              disabled={(!file && !textContent.trim()) || isUploading}
+            >
+              {isUploading ? (
+                <>
+                  <Upload className="h-4 w-4 mr-2 animate-spin" />
+                  Encrypting & Uploading...
+                </>
+              ) : (
+                <>
+                  <Lock className="h-4 w-4 mr-2" />
+                  Encrypt & Share
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    </DashboardLayout>
   );
 }
