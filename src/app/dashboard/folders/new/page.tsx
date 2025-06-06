@@ -26,17 +26,28 @@ export default function NewFolderPage() {
     }
 
     setIsCreating(true);
-    setError("");
+    setError("");    try {
+      const response = await fetch('/api/folders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: folderName,
+          description: description || undefined,
+        }),
+      });
 
-    try {
-      // Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Simulate successful creation
-      router.push("/dashboard/folders");
+      const data = await response.json();
+
+      if (response.ok) {
+        router.push("/dashboard/folders");
+      } else {
+        throw new Error(data.error || 'Failed to create folder');
+      }
     } catch (error) {
       console.error("Failed to create folder:", error);
-      setError("Failed to create folder. Please try again.");
+      setError(error instanceof Error ? error.message : "Failed to create folder. Please try again.");
     } finally {
       setIsCreating(false);
     }

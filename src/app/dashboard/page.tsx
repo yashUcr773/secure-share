@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,48 +8,90 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Upload, FolderOpen, File, Share2, Trash2, Edit, Plus, Search } from "lucide-react";
 
+interface FileItem {
+  id: string;
+  fileName: string;
+  createdAt: string;
+  fileSize: number;
+  isPasswordProtected: boolean;
+}
+
+interface FolderItem {
+  id: string;
+  name: string;
+  fileCount: number;
+  createdAt: string;
+}
 
 export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [files, setFiles] = useState<FileItem[]>([]);
+  const [folders, setFolders] = useState<FolderItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock data - in real app, this would come from your backend
-  const [files] = useState([
-    {
-      id: "1",
-      name: "Important Document.txt",
-      size: "2.1 KB",
-      created: "2 hours ago",
-      isPasswordProtected: true,
-      shareLink: "https://secureshare.com/share/abc123"
-    },
-    {
-      id: "2", 
-      name: "Meeting Notes.md",
-      size: "5.3 KB",
-      created: "1 day ago",
-      isPasswordProtected: false,
-      shareLink: "https://secureshare.com/share/def456"
-    },
-    {
-      id: "3",
-      name: "Code Snippet.js",
-      size: "1.8 KB", 
-      created: "3 days ago",
-      isPasswordProtected: true,
-      shareLink: "https://secureshare.com/share/ghi789"
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      // Fetch recent files and folders
+      const [filesResponse, foldersResponse] = await Promise.all([
+        fetch('/api/dashboard/files'),
+        fetch('/api/folders')
+      ]);
+
+      if (filesResponse.ok) {
+        const filesData = await filesResponse.json();
+        // Get only the 3 most recent files for dashboard
+        setFiles((filesData.files || []).slice(0, 3));
+      }
+
+      if (foldersResponse.ok) {
+        const foldersData = await foldersResponse.json();
+        setFolders(foldersData.folders || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch dashboard data:", error);
+    } finally {
+      setLoading(false);
     }
-  ]);
-
-  const [folders] = useState([
-    { id: "1", name: "Work Documents", fileCount: 8, created: "1 week ago" },
-    { id: "2", name: "Personal", fileCount: 3, created: "2 weeks ago" },
-    { id: "3", name: "Projects", fileCount: 12, created: "1 month ago" }
-  ]);
-
-  const copyShareLink = async (shareLink: string) => {
-    await navigator.clipboard.writeText(shareLink);
+  };
+  const copyShareLink = async (fileId: string) => {
+    const shareUrl = `${window.location.origin}/share/${fileId}`;
+    await navigator.clipboard.writeText(shareUrl);
     // TODO: Show toast notification
   };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 1) return "1 day ago";
+    if (diffDays < 7) return `${diffDays} days ago`;
+    if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
+    return `${Math.ceil(diffDays / 30)} months ago`;
+  };
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -113,8 +155,7 @@ export default function DashboardPage() {
               <CardDescription>Organize your files into folders</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {folders.map((folder) => (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">                {folders.map((folder) => (
                   <Card key={folder.id} className="cursor-pointer hover:shadow-md transition-shadow">
                     <CardContent className="p-4">
                       <div className="flex items-start gap-3">
@@ -124,7 +165,7 @@ export default function DashboardPage() {
                           <p className="text-sm text-muted-foreground">
                             {folder.fileCount} files
                           </p>
-                          <p className="text-xs text-muted-foreground">{folder.created}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(folder.createdAt)}</p>
                         </div>
                       </div>
                     </CardContent>
@@ -141,15 +182,14 @@ export default function DashboardPage() {
               <CardDescription>Your recently uploaded files</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {files.map((file) => (
+              <div className="space-y-4">                {files.map((file) => (
                   <div key={file.id} className="flex items-center justify-between p-4 border rounded-lg">
                     <div className="flex items-center gap-3">
                       <File className="h-8 w-8 text-muted-foreground" />
                       <div>
-                        <h3 className="font-medium">{file.name}</h3>
+                        <h3 className="font-medium">{file.fileName}</h3>
                         <p className="text-sm text-muted-foreground">
-                          {file.size} • {file.created}
+                          {formatFileSize(file.fileSize)} • {formatDate(file.createdAt)}
                           {file.isPasswordProtected && " • Password protected"}
                         </p>
                       </div>
@@ -161,7 +201,7 @@ export default function DashboardPage() {
                       <Button 
                         variant="ghost" 
                         size="sm"
-                        onClick={() => copyShareLink(file.shareLink)}
+                        onClick={() => copyShareLink(file.id)}
                       >
                         <Share2 className="h-4 w-4" />
                       </Button>

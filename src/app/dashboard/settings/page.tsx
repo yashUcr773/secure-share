@@ -30,7 +30,6 @@ export default function SettingsPage() {
   });
   const [isUpdating, setIsUpdating] = useState(false);
   const [message, setMessage] = useState("");
-
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsUpdating(true);
@@ -38,8 +37,19 @@ export default function SettingsPage() {
 
     try {
       // Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setMessage("Profile updated successfully!");
+      const response = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(profile),
+      });
+
+      if (response.ok) {
+        setMessage("Profile updated successfully!");
+      } else {
+        throw new Error('Failed to update profile');
+      }
     } catch (error) {
         console.error("Failed to update profile:", error);
       setMessage("Failed to update profile. Please try again.");
@@ -62,29 +72,54 @@ export default function SettingsPage() {
     }
 
     setIsUpdating(true);
-    setMessage("");
+    setMessage("");    try {
+      const response = await fetch('/api/auth/password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: passwords.current,
+          newPassword: passwords.new,
+        }),
+      });
 
-    try {
-      // Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setMessage("Password changed successfully!");
-      setPasswords({ current: "", new: "", confirm: "" });
+      const data = await response.json();
+
+      if (response.ok) {
+        setMessage("Password changed successfully!");
+        setPasswords({ current: "", new: "", confirm: "" });
+      } else {
+        throw new Error(data.error || 'Failed to change password');
+      }
     } catch (error) {
         console.error("Failed to change password:", error);
-      setMessage("Failed to change password. Please try again.");
+      setMessage(error instanceof Error ? error.message : "Failed to change password. Please try again.");
     } finally {
       setIsUpdating(false);
     }
   };
-
   const handleNotificationUpdate = async (key: string, value: boolean) => {
-    setNotifications(prev => ({ ...prev, [key]: value }));
+    const updatedSettings = { ...notifications, [key]: value };
+    setNotifications(updatedSettings);
     
     try {
-      // Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 500));
+      const response = await fetch('/api/auth/notifications', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedSettings),
+      });
+
+      if (!response.ok) {
+        // Revert change on error
+        setNotifications(prev => ({ ...prev, [key]: !value }));
+        throw new Error('Failed to update notification setting');
+      }
     } catch (error) {
       console.error("Failed to update notification setting:", error);
+      setMessage("Failed to update notification setting. Please try again.");
     }
   };
 
@@ -96,15 +131,20 @@ export default function SettingsPage() {
     
     if (userInput !== confirmText) {
       return;
-    }
+    }    try {
+      const response = await fetch('/api/auth/account', {
+        method: 'DELETE',
+      });
 
-    try {
-      // Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      logout();
+      if (response.ok) {
+        logout();
+      } else {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to delete account');
+      }
     } catch (error) {
         console.error("Failed to delete account:", error);
-      setMessage("Failed to delete account. Please try again.");
+      setMessage(error instanceof Error ? error.message : "Failed to delete account. Please try again.");
     }
   };
 

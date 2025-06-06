@@ -49,79 +49,25 @@ export default function AnalyticsPage() {
 
   const fetchAnalytics = async () => {
     try {
-      // Simulate API call - replace with actual API
-      setTimeout(() => {
-        setAnalytics({
-          totalViews: 1247,
-          totalDownloads: 389,
-          totalShares: 56,
-          activeLinks: 12,
-          recentActivity: [
-            {
-              id: "1",
-              type: "view",
-              fileName: "project-proposal.txt",
-              timestamp: "2024-01-20T15:30:00Z",
-              userAgent: "Chrome on Windows",
-            },
-            {
-              id: "2",
-              type: "download",
-              fileName: "meeting-notes.txt",
-              timestamp: "2024-01-20T14:15:00Z",
-              userAgent: "Safari on macOS",
-            },
-            {
-              id: "3",
-              type: "share",
-              fileName: "budget-report.txt",
-              timestamp: "2024-01-20T12:45:00Z",
-            },
-            {
-              id: "4",
-              type: "view",
-              fileName: "presentation.txt",
-              timestamp: "2024-01-20T11:20:00Z",
-              userAgent: "Firefox on Linux",
-            },
-          ],
-          popularFiles: [
-            {
-              id: "1",
-              fileName: "project-proposal.txt",
-              views: 234,
-              downloads: 67,
-              shares: 12,
-            },
-            {
-              id: "2",
-              fileName: "meeting-notes.txt",
-              views: 189,
-              downloads: 45,
-              shares: 8,
-            },
-            {
-              id: "3",
-              fileName: "budget-report.txt",
-              views: 156,
-              downloads: 23,
-              shares: 15,
-            },
-          ],
-          viewsOverTime: [
-            { date: "2024-01-14", views: 45, downloads: 12 },
-            { date: "2024-01-15", views: 67, downloads: 18 },
-            { date: "2024-01-16", views: 89, downloads: 25 },
-            { date: "2024-01-17", views: 123, downloads: 34 },
-            { date: "2024-01-18", views: 98, downloads: 28 },
-            { date: "2024-01-19", views: 156, downloads: 42 },
-            { date: "2024-01-20", views: 134, downloads: 38 },
-          ],
-        });
-        setLoading(false);
-      }, 1000);
+      setLoading(true);
+      const response = await fetch(`/api/dashboard/analytics?timeRange=${timeRange}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch analytics');
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setAnalytics(data.analytics);
+      } else {
+        throw new Error(data.error || 'Failed to fetch analytics');
+      }
+      
     } catch (error) {
       console.error("Failed to fetch analytics:", error);
+      setAnalytics(null);
+    } finally {
       setLoading(false);
     }
   };
