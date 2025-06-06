@@ -1,14 +1,78 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FileStorage } from '@/lib/storage';
+import { EdgeAuthService } from '@/lib/auth-edge';
+import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+
+// Handle CORS preflight requests
+export async function OPTIONS(request: NextRequest) {
+  const response = handleCORSPreflight(request);
+  return response ? addSecurityHeaders(response) : new NextResponse(null, { status: 405 });
+}
 
 // GET /api/dashboard/analytics - Get analytics data for the current user
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const timeRange = searchParams.get('timeRange') || '30d';
+    // Apply rate limiting
+    const identifier = createRateLimitIdentifier(request, 'analytics');
+    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
     
-    // TODO: Get user ID from authentication
-    const userId = 'anonymous'; // Placeholder
+    if (!rateLimitResult.success) {
+      const response = NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 }
+      );
+      
+      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
+      return addSecurityHeaders(response);
+    }
+
+    // Validate request origin (CSRF protection)
+    const allowedOrigins = [
+      process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    ];
+    
+    if (!validateOrigin(request, allowedOrigins)) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid request origin' },
+        { status: 403 }
+      ));
+    }
+
+    // Authentication check
+    const token = request.cookies.get('auth-token')?.value;
+    
+    if (!token) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      ));
+    }
+
+    let userId = 'anonymous';
+    try {
+      const payload = await EdgeAuthService.verifyToken(token);
+      if (payload) {
+        userId = payload.userId;
+      } else {
+        return addSecurityHeaders(NextResponse.json(
+          { error: 'Invalid token' },
+          { status: 401 }
+        ));
+      }
+    } catch (error) {
+      console.error('Token verification failed:', error);
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid token' },
+        { status: 401 }
+      ));
+    }
+
+    const { searchParams } = new URL(request.url);
+    const timeRange = sanitizeInput(searchParams.get('timeRange') || '30d');
     
     // Get user's shared links for analytics
     const sharedLinks = await FileStorage.getUserSharedLinks(userId);
@@ -65,18 +129,24 @@ export async function GET(request: NextRequest) {
       recentActivity,
       popularFiles,
       viewsOverTime,
-    };
-    
-    return NextResponse.json({
+    };    const response = NextResponse.json({
       success: true,
       analytics: analyticsData,
     });
 
+    // Add rate limit headers
+    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
+    return addSecurityHeaders(response);
+
   } catch (error) {
     console.error('Analytics error:', error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
     );
+    return addSecurityHeaders(response);
   }
 }

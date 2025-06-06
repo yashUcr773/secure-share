@@ -3,6 +3,7 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
+import jwt from 'jsonwebtoken';
 import { config } from './config';
 
 // User interface
@@ -181,39 +182,44 @@ export class AuthService {
       return false;
     }
   }
-
   /**
-   * Generate a simple JWT-like token (for development)
-   * In production, use a proper JWT library
+   * Generate a JWT token with proper signing
    */
   static async generateToken(user: User): Promise<string> {
-    const payload: JWTPayload = {
+    const payload: Omit<JWTPayload, 'iat' | 'exp'> = {
       userId: user.id,
       email: user.email,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
     };
 
-    // Simple base64 encoding for development
-    // In production, use proper JWT signing
-    const token = btoa(JSON.stringify(payload));
-    return token;
-  }
+    const secret = config.jwtSecret || 'dev-fallback-secret-key-not-for-production';
+    
+    if (!config.jwtSecret && config.nodeEnv === 'production') {
+      throw new Error('JWT_SECRET must be set in production');
+    }
 
+    return jwt.sign(payload, secret, {
+      expiresIn: '24h',
+      issuer: 'secure-share',
+      audience: 'secure-share-users'
+    });
+  }
   /**
-   * Verify and decode a token
+   * Verify and decode a JWT token with proper signature verification
    */
   static async verifyToken(token: string): Promise<JWTPayload | null> {
     try {
-      // Simple base64 decoding for development
-      const payload: JWTPayload = JSON.parse(atob(token));
+      const secret = config.jwtSecret || 'dev-fallback-secret-key-not-for-production';
       
-      // Check expiration
-      if (payload.exp < Math.floor(Date.now() / 1000)) {
-        return null; // Token expired
+      if (!config.jwtSecret && config.nodeEnv === 'production') {
+        throw new Error('JWT_SECRET must be set in production');
       }
 
-      return payload;
+      const decoded = jwt.verify(token, secret, {
+        issuer: 'secure-share',
+        audience: 'secure-share-users'
+      }) as JWTPayload;
+
+      return decoded;
     } catch (error) {
       console.error('Token verification error:', error);
       return null;
@@ -403,6 +409,60 @@ export class AuthService {
     } catch (error) {
       console.error('Get current user error:', error);
       return null;
+    }
+  }
+
+  /**
+   * Update user information
+   */
+  static async updateUser(userId: string, updates: Partial<User>): Promise<{ success: boolean; error?: string }> {
+    await this.init();
+
+    try {
+      // Get current user
+      const currentUser = await this.getUserById(userId);
+      if (!currentUser) {
+        return { success: false, error: 'User not found' };
+      }
+
+      // Create updated user object
+      const updatedUser: User = {
+        ...currentUser,
+        ...updates,
+        id: currentUser.id, // Ensure ID cannot be changed
+        updatedAt: new Date().toISOString()
+      };
+
+      // If email is being updated, we need to update the email index
+      if (updates.email && updates.email !== currentUser.email) {
+        // Check if new email is already in use
+        const existingUser = await this.getUserByEmail(updates.email);
+        if (existingUser && existingUser.id !== userId) {
+          return { success: false, error: 'Email already in use' };
+        }
+
+        // Update email index
+        const indexContent = await fs.readFile(this.USERS_INDEX, 'utf-8');
+        const index = JSON.parse(indexContent);
+
+        // Remove old email entry
+        delete index[currentUser.email];
+        
+        // Add new email entry
+        index[updates.email.toLowerCase().trim()] = userId;
+        
+        await fs.writeFile(this.USERS_INDEX, JSON.stringify(index, null, 2));
+      }
+
+      // Save updated user
+      await this.saveUser(updatedUser);
+
+      console.log(`User ${userId} updated successfully`);
+      return { success: true };
+
+    } catch (error) {
+      console.error('Update user error:', error);
+      return { success: false, error: 'User update failed' };
     }
   }
 }

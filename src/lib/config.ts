@@ -18,10 +18,17 @@ export const config = {
   // Database Settings (for future use)
   databaseUrl: process.env.DATABASE_URL,
   redisUrl: process.env.REDIS_URL,
-  
-  // Authentication Settings (for future use)
+    // Authentication Settings
   jwtSecret: process.env.JWT_SECRET,
   sessionSecret: process.env.SESSION_SECRET,
+  
+  // Rate Limiting
+  rateLimit: {
+    uploadPerHour: parseInt(process.env.RATE_LIMIT_UPLOAD_PER_HOUR || '10'),
+    downloadPerHour: parseInt(process.env.RATE_LIMIT_DOWNLOAD_PER_HOUR || '100'),
+    authPerHour: parseInt(process.env.RATE_LIMIT_AUTH_PER_HOUR || '5'),
+    maxConcurrentUploads: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT_UPLOADS || '3'),
+  },
   
   // Email Settings (for future use)
   smtp: {
@@ -30,21 +37,13 @@ export const config = {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  
-  // Feature Flags
+    // Feature Flags
   features: {
-    authentication: false, // Enable when auth is implemented
+    authentication: true, // Enable authentication
     emailNotifications: false, // Enable when email is implemented
     fileUpload: true,
     passwordProtection: true,
     keyBasedSharing: true,
-  },
-  
-  // Rate Limiting (for future implementation)
-  rateLimit: {
-    uploadPerHour: 10,
-    downloadPerHour: 100,
-    maxConcurrentUploads: 3,
   },
 };
 
@@ -63,10 +62,11 @@ export function validateConfig() {
   if (config.keyDerivationIterations < 10000) {
     errors.push('KEY_DERIVATION_ITERATIONS should be at least 10000 for security');
   }
-  
-  if (config.nodeEnv === 'production') {
+    if (config.nodeEnv === 'production') {
     if (!config.jwtSecret) {
-      console.warn('JWT_SECRET not set - authentication features will be disabled');
+      errors.push('JWT_SECRET is required in production');
+    } else if (config.jwtSecret.length < 32) {
+      errors.push('JWT_SECRET must be at least 32 characters long');
     }
     
     if (!config.databaseUrl) {

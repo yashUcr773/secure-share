@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { useCSRF } from '@/hooks/useCSRF';
 
 interface User {
   id: string;
@@ -20,6 +21,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const { csrfFetch } = useCSRF();
 
   // Check for existing auth session on mount
   useEffect(() => {
@@ -43,11 +45,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await csrfFetch('/api/auth/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ email, password }),
       });
 
@@ -67,11 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = async (email: string, password: string, confirmPassword: string) => {
     try {
-      const response = await fetch('/api/auth/signup', {
+      const response = await csrfFetch('/api/auth/signup', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ email, password, confirmPassword }),
       });
 
@@ -89,10 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Network error' };
     }
   };
-
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', {
+      await csrfFetch('/api/auth/logout', {
         method: 'POST',
       });
       setUser(null);

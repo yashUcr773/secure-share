@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/auth';
+import { generateCSRFToken, addSecurityHeaders, handleCORSPreflight, validateOrigin } from '@/lib/security';
 import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
-import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -12,7 +11,7 @@ export async function OPTIONS(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'auth_me');
+    const identifier = createRateLimitIdentifier(request, 'csrf_token');
     const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
     
     if (!rateLimitResult.success) {
@@ -28,7 +27,7 @@ export async function GET(request: NextRequest) {
       return addSecurityHeaders(response);
     }
 
-    // Validate request origin (CSRF protection)
+    // Validate request origin
     const allowedOrigins = [
       process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
     ];
@@ -40,36 +39,12 @@ export async function GET(request: NextRequest) {
       ));
     }
 
-    const token = request.cookies.get('auth-token')?.value;
-    
-    if (!token) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      ));
-    }
-
-    const payload = await AuthService.verifyToken(token);
-    
-    if (!payload) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'Invalid token' },
-        { status: 401 }
-      ));
-    }
-
-    // Get full user details
-    const user = await AuthService.getUserById(payload.userId);
-    
-    if (!user) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'User not found' },
-        { status: 401 }
-      ));
-    }
+    // Generate CSRF token
+    const token = generateCSRFToken();
 
     const response = NextResponse.json({
-      user: { id: user.id, email: user.email }
+      token,
+      expires: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutes
     });
 
     // Add rate limit headers
@@ -80,7 +55,7 @@ export async function GET(request: NextRequest) {
     return addSecurityHeaders(response);
 
   } catch (error) {
-    console.error('Auth verification error:', error);
+    console.error('CSRF token generation error:', error);
     const response = NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

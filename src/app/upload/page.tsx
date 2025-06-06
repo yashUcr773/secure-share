@@ -9,8 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Upload, Lock, Eye, EyeOff, Copy, Check } from "lucide-react";
 import { FileEncryption } from "@/lib/crypto";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { useCSRF } from "@/hooks/useCSRF";
 
 export default function UploadPage() {
+  const { csrfFetch } = useCSRF();
   const [file, setFile] = useState<File | null>(null);
   const [textContent, setTextContent] = useState("");
   const [password, setPassword] = useState("");
@@ -74,13 +76,10 @@ export default function UploadPage() {
         // Encrypt with random key
         encryptionResult = await FileEncryption.encryptWithRandomKey(textContent);
       }
-      
-      // Upload to API
-      const response = await fetch('/api/upload', {
+        // Upload to API
+      const response = await csrfFetch('/api/upload', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },        body: JSON.stringify({
+        body: JSON.stringify({
           encryptedContent: encryptionResult.encryptedContent,
           salt: 'salt' in encryptionResult ? encryptionResult.salt : null,
           iv: encryptionResult.iv,

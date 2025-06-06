@@ -1,5 +1,74 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { FileStorage } from '@/lib/storage';
+import { EdgeAuthService } from '@/lib/auth-edge';
+import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+
+// Validation schema for folder updates
+const updateFolderSchema = z.object({
+  name: z.string().min(1, 'Folder name is required').max(255, 'Folder name too long').optional(),
+  parentId: z.string().nullable().optional(),
+});
+
+// Handle CORS preflight requests
+export async function OPTIONS(request: NextRequest) {
+  const response = handleCORSPreflight(request);
+  return response ? addSecurityHeaders(response) : new NextResponse(null, { status: 405 });
+}
+
+// Authentication and authorization helper
+async function verifyFolderAccess(request: NextRequest, folderId: string): Promise<{ success: boolean; userId?: string; response?: NextResponse }> {
+  const token = request.cookies.get('auth-token')?.value;
+  
+  if (!token) {
+    return {
+      success: false,
+      response: addSecurityHeaders(NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      ))
+    };
+  }
+
+  try {
+    const payload = await EdgeAuthService.verifyToken(token);
+    if (!payload) {
+      return {
+        success: false,
+        response: addSecurityHeaders(NextResponse.json(
+          { error: 'Invalid token' },
+          { status: 401 }
+        ))
+      };
+    }
+
+    // Verify user owns this folder
+    const userFolders = await FileStorage.getUserFolders(payload.userId);
+    const folderExists = userFolders.some(folder => folder.id === folderId);
+    
+    if (!folderExists) {
+      return {
+        success: false,
+        response: addSecurityHeaders(NextResponse.json(
+          { error: 'Folder not found or access denied' },
+          { status: 404 }
+        ))
+      };
+    }
+
+    return { success: true, userId: payload.userId };
+  } catch (error) {
+    console.error('Token verification failed:', error);
+    return {
+      success: false,
+      response: addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid token' },
+        { status: 401 }
+      ))
+    };
+  }
+}
 
 // GET - Get specific folder
 export async function GET(
@@ -7,24 +76,56 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: folderId } = await params;
+    // Apply rate limiting
+    const identifier = createRateLimitIdentifier(request, 'folder_get');
+    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
     
-    const folder = await FileStorage.getFolder(folderId);
-    
-    if (!folder) {
-      return NextResponse.json(
-        { error: 'Folder not found' },
-        { status: 404 }
+    if (!rateLimitResult.success) {
+      const response = NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 }
       );
+      
+      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
+      return addSecurityHeaders(response);
     }
 
-    return NextResponse.json({ folder });
+    const { id: folderId } = await params;
+    const sanitizedFolderId = sanitizeInput(folderId);
+    
+    // Verify access
+    const auth = await verifyFolderAccess(request, sanitizedFolderId);
+    if (!auth.success) {
+      return auth.response!;
+    }
+
+    const folder = await FileStorage.getFolder(sanitizedFolderId);
+    
+    if (!folder) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Folder not found' },
+        { status: 404 }
+      ));
+    }
+
+    const response = NextResponse.json({ folder });
+
+    // Add rate limit headers
+    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
+    return addSecurityHeaders(response);
   } catch (error) {
     console.error('Folder fetch error:', error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: 'Failed to fetch folder' },
       { status: 500 }
     );
+    return addSecurityHeaders(response);
   }
 }
 
@@ -34,43 +135,92 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: folderId } = await params;
-    const body = await request.json();
-    const { name, parentId } = body;
+    // Apply rate limiting
+    const identifier = createRateLimitIdentifier(request, 'folder_update');
+    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    
+    if (!rateLimitResult.success) {
+      const response = NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 }
+      );
+      
+      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
+      return addSecurityHeaders(response);
+    }
 
-    const updates:{name?:string, parentId?:string} = {};
+    // Validate request origin (CSRF protection)
+    const allowedOrigins = [
+      process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    ];
+    
+    if (!validateOrigin(request, allowedOrigins)) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid request origin' },
+        { status: 403 }
+      ));
+    }
+
+    const { id: folderId } = await params;
+    const sanitizedFolderId = sanitizeInput(folderId);
+    
+    // Verify access
+    const auth = await verifyFolderAccess(request, sanitizedFolderId);
+    if (!auth.success) {
+      return auth.response!;
+    }
+
+    const body = await request.json();
+    
+    // Validate input
+    const validation = updateFolderSchema.safeParse(body);
+    if (!validation.success) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Validation failed', details: validation.error.errors },
+        { status: 400 }
+      ));
+    }
+
+    const { name, parentId } = validation.data;
+
+    const updates: { name?: string, parentId?: string } = {};
     if (name !== undefined) {
-      if (typeof name !== 'string' || name.trim().length === 0) {
-        return NextResponse.json(
-          { error: 'Invalid folder name' },
-          { status: 400 }
-        );
-      }
-      updates.name = name.trim();
+      updates.name = sanitizeInput(name.trim());
     }
     if (parentId !== undefined) {
-      updates.parentId = parentId;
+      updates.parentId = parentId ? sanitizeInput(parentId) : null;
     }
 
-    const folder = await FileStorage.updateFolder(folderId, updates);
+    const folder = await FileStorage.updateFolder(sanitizedFolderId, updates);
     
     if (!folder) {
-      return NextResponse.json(
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Folder not found' },
         { status: 404 }
-      );
+      ));
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       folder,
       message: 'Folder updated successfully',
     });
+
+    // Add rate limit headers
+    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
+    return addSecurityHeaders(response);
   } catch (error) {
     console.error('Folder update error:', error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: 'Failed to update folder' },
       { status: 500 }
     );
+    return addSecurityHeaders(response);
   }
 }
 
@@ -80,25 +230,69 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: folderId } = await params;
+    // Apply rate limiting
+    const identifier = createRateLimitIdentifier(request, 'folder_delete');
+    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
     
-    const success = await FileStorage.deleteFolder(folderId);
-    
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Folder not found' },
-        { status: 404 }
+    if (!rateLimitResult.success) {
+      const response = NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 }
       );
+      
+      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
+      return addSecurityHeaders(response);
     }
 
-    return NextResponse.json({
+    // Validate request origin (CSRF protection)
+    const allowedOrigins = [
+      process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    ];
+    
+    if (!validateOrigin(request, allowedOrigins)) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid request origin' },
+        { status: 403 }
+      ));
+    }
+
+    const { id: folderId } = await params;
+    const sanitizedFolderId = sanitizeInput(folderId);
+    
+    // Verify access
+    const auth = await verifyFolderAccess(request, sanitizedFolderId);
+    if (!auth.success) {
+      return auth.response!;
+    }
+
+    const success = await FileStorage.deleteFolder(sanitizedFolderId);
+    
+    if (!success) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Folder not found' },
+        { status: 404 }
+      ));
+    }
+
+    const response = NextResponse.json({
       message: 'Folder deleted successfully',
     });
+
+    // Add rate limit headers
+    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
+    return addSecurityHeaders(response);
   } catch (error) {
     console.error('Folder deletion error:', error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: 'Failed to delete folder' },
       { status: 500 }
     );
+    return addSecurityHeaders(response);
   }
 }

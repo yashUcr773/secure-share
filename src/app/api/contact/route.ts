@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFToken } from '@/lib/security';
+
+// Handle CORS preflight requests
+export async function OPTIONS(request: NextRequest) {
+  const response = handleCORSPreflight(request);
+  return response ? addSecurityHeaders(response) : new NextResponse(null, { status: 405 });
+}
 
 // Validation schema for contact form
 const contactFormSchema = z.object({
@@ -11,34 +19,76 @@ const contactFormSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    // Apply rate limiting for contact form
+    const identifier = createRateLimitIdentifier(request, 'contact');
+    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    
+    if (!rateLimitResult.success) {
+      const response = NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 }
+      );
+      
+      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
+      return addSecurityHeaders(response);
+    }    // Validate request origin (CSRF protection)
+    const allowedOrigins = [
+      process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    ];
+    
+    if (!validateOrigin(request, allowedOrigins)) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid request origin' },
+        { status: 403 }
+      ));
+    }
+
+    // Validate CSRF token (for non-authenticated users, use basic validation)
+    const csrfValid = validateCSRFToken(request);
+    if (!csrfValid) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid CSRF token' },
+        { status: 403 }
+      ));
+    }
+
     const body = await request.json();
     
     // Validate input
     const validation = contactFormSchema.safeParse(body);
     if (!validation.success) {
-      return NextResponse.json(
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Validation failed', details: validation.error.errors },
         { status: 400 }
-      );
+      ));
     }
 
     const { name, email, subject, message } = validation.data;
+
+    // Sanitize inputs to prevent XSS
+    const sanitizedData = {
+      name: sanitizeInput(name),
+      email: sanitizeInput(email.toLowerCase().trim()),
+      subject: sanitizeInput(subject),
+      message: sanitizeInput(message),
+    };
 
     // TODO: In a real application, you would:
     // 1. Save the message to a database
     // 2. Send an email to the support team
     // 3. Send a confirmation email to the user
-    // 4. Add rate limiting to prevent spam
+    // 4. Add additional spam protection (captcha, etc.)
     
     console.log('Contact form submission:', {
-      name,
-      email,
-      subject,
-      message,
+      ...sanitizedData,
       timestamp: new Date().toISOString(),
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
     });
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { 
         message: 'Message sent successfully',
         id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -46,11 +96,19 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
 
+    // Add rate limit headers
+    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
+    return addSecurityHeaders(response);
+
   } catch (error) {
     console.error('Contact form error:', error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
     );
+    return addSecurityHeaders(response);
   }
 }

@@ -8,9 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {  User, Shield, Bell, Trash2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCSRF } from "@/hooks/useCSRF";
 
 export default function SettingsPage() {
-  const { user, logout } = useAuth();  const [profile, setProfile] = useState({
+  const { user, logout } = useAuth();
+  const { csrfFetch } = useCSRF();const [profile, setProfile] = useState({
     email: user?.email || "",
   });
   const [passwords, setPasswords] = useState({
@@ -29,19 +31,14 @@ export default function SettingsPage() {
     securityAlerts: true,
   });
   const [isUpdating, setIsUpdating] = useState(false);
-  const [message, setMessage] = useState("");
-  const handleProfileUpdate = async (e: React.FormEvent) => {
+  const [message, setMessage] = useState("");  const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsUpdating(true);
     setMessage("");
 
     try {
-      // Replace with actual API call
-      const response = await fetch('/api/auth/profile', {
+      const response = await csrfFetch('/api/auth/profile', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(profile),
       });
 
@@ -73,11 +70,8 @@ export default function SettingsPage() {
 
     setIsUpdating(true);
     setMessage("");    try {
-      const response = await fetch('/api/auth/password', {
+      const response = await csrfFetch('/api/auth/password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           currentPassword: passwords.current,
           newPassword: passwords.new,
@@ -102,13 +96,9 @@ export default function SettingsPage() {
   const handleNotificationUpdate = async (key: string, value: boolean) => {
     const updatedSettings = { ...notifications, [key]: value };
     setNotifications(updatedSettings);
-    
-    try {
-      const response = await fetch('/api/auth/notifications', {
+      try {
+      const response = await csrfFetch('/api/auth/notifications', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(updatedSettings),
       });
 
@@ -132,7 +122,7 @@ export default function SettingsPage() {
     if (userInput !== confirmText) {
       return;
     }    try {
-      const response = await fetch('/api/auth/account', {
+      const response = await csrfFetch('/api/auth/account', {
         method: 'DELETE',
       });
 

@@ -1,28 +1,43 @@
 // Edge-compatible authentication utilities for middleware
 // This version works in Next.js Edge Runtime
 
+import { jwtVerify } from 'jose';
+
 export interface JWTPayload {
   userId: string;
   email: string;
   iat: number;
   exp: number;
+  iss: string;
+  aud: string;
 }
 
 export class EdgeAuthService {
   /**
-   * Verify and decode a token (Edge Runtime compatible)
+   * Verify and decode a token (Edge Runtime compatible with jose)
    */
   static async verifyToken(token: string): Promise<JWTPayload | null> {
     try {
-      // Simple base64 decoding for development
-      const payload: JWTPayload = JSON.parse(atob(token));
+      const secret = process.env.JWT_SECRET || 'dev-fallback-secret-key-not-for-production';
       
-      // Check expiration
-      if (payload.exp < Math.floor(Date.now() / 1000)) {
-        return null; // Token expired
+      if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+        console.error('JWT_SECRET must be set in production');
+        return null;
       }
 
-      return payload;
+      // Use jose library for edge runtime JWT verification
+      const encoder = new TextEncoder();
+      const secretKey = encoder.encode(secret);
+      
+      const { payload } = await jwtVerify(token, secretKey, {
+        issuer: 'secure-share',
+        audience: 'secure-share-users'
+      });      // Validate payload structure and cast
+      if (typeof payload.userId === 'string' && typeof payload.email === 'string') {
+        return payload as unknown as JWTPayload;
+      }
+      
+      return null;
     } catch (error) {
       console.error('Token verification error:', error);
       return null;

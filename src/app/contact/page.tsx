@@ -8,8 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mail, MessageSquare, Phone, MapPin, Send, Check } from "lucide-react";
+import { useCSRF } from "@/hooks/useCSRF";
 
 export default function ContactPage() {
+  const { csrfFetch } = useCSRF();
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -28,13 +30,9 @@ export default function ContactPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
-    try {
-      const response = await fetch('/api/contact', {
+      try {
+      const response = await csrfFetch('/api/contact', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(formData),
       });
 
