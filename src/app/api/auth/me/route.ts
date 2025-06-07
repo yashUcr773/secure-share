@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/auth';
-import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { AuthService } from '@/lib/auth-enhanced';
+import { RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
 
 // Handle CORS preflight requests
@@ -12,20 +12,23 @@ export async function OPTIONS(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'auth_me');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const clientIp = request.headers.get('x-forwarded-for') || 
+                    request.headers.get('x-real-ip') || 
+                    'unknown';
+    const identifier = `auth_me:${clientIp}`;
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'me_request', 
+      100, 
+      60 * 1000 // 100 requests per minute
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Validate request origin (CSRF protection)
@@ -49,42 +52,33 @@ export async function GET(request: NextRequest) {
       ));
     }
 
-    const payload = await AuthService.verifyToken(token);
+    // Verify token using enhanced auth service
+    const verificationResult = await AuthService.verifyToken(token);
     
-    if (!payload) {
+    if (!verificationResult.valid || !verificationResult.user) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid token' },
         { status: 401 }
       ));
     }
 
-    // Get full user details
-    const user = await AuthService.getUserById(payload.userId);
-    
-    if (!user) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'User not found' },
-        { status: 401 }
-      ));
-    }
-
-    const response = NextResponse.json({
-      user: { id: user.id, email: user.email }
-    });
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
+    const user = verificationResult.user;    const response = NextResponse.json({
+      user: { 
+        id: user.id, 
+        email: user.email,
+        name: user.name,
+        isActive: user.isActive,
+        createdAt: user.createdAt
+      }
     });
 
     return addSecurityHeaders(response);
 
   } catch (error) {
     console.error('Auth verification error:', error);
-    const response = NextResponse.json(
+    return addSecurityHeaders(NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
-    return addSecurityHeaders(response);
+    ));
   }
 }

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { FileStorage } from '@/lib/storage';
-import { EdgeAuthService } from '@/lib/auth-edge';
-import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { FolderService, RateLimitService } from '@/lib/database';
+import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+import { getClientIP } from '@/lib/rate-limit';
 
 // Validation schema for folder updates
 const updateFolderSchema = z.object({
@@ -32,8 +32,8 @@ async function verifyFolderAccess(request: NextRequest, folderId: string): Promi
   }
 
   try {
-    const payload = await EdgeAuthService.verifyToken(token);
-    if (!payload) {
+    const result = await AuthService.verifyToken(token);
+    if (!result.valid || !result.user) {
       return {
         success: false,
         response: addSecurityHeaders(NextResponse.json(
@@ -44,10 +44,8 @@ async function verifyFolderAccess(request: NextRequest, folderId: string): Promi
     }
 
     // Verify user owns this folder
-    const userFolders = await FileStorage.getUserFolders(payload.userId);
-    const folderExists = userFolders.some(folder => folder.id === folderId);
-    
-    if (!folderExists) {
+    const folder = await FolderService.getFolder(folderId);
+    if (!folder || folder.userId !== result.user.id) {
       return {
         success: false,
         response: addSecurityHeaders(NextResponse.json(
@@ -57,7 +55,7 @@ async function verifyFolderAccess(request: NextRequest, folderId: string): Promi
       };
     }
 
-    return { success: true, userId: payload.userId };
+    return { success: true, userId: result.user.id };
   } catch (error) {
     console.error('Token verification failed:', error);
     return {
@@ -75,20 +73,23 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'folder_get');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+  try {    // Apply rate limiting
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      getClientIP(request),
+      'folder_get',
+      100, // requests
+      60 * 60 * 1000 // 1 hour window
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '100');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -102,7 +103,7 @@ export async function GET(
       return auth.response!;
     }
 
-    const folder = await FileStorage.getFolder(sanitizedFolderId);
+    const folder = await FolderService.getFolder(sanitizedFolderId);
     
     if (!folder) {
       return addSecurityHeaders(NextResponse.json(
@@ -114,9 +115,9 @@ export async function GET(
     const response = NextResponse.json({ folder });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '100');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
   } catch (error) {
@@ -134,20 +135,23 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'folder_update');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+  try {    // Apply rate limiting
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      getClientIP(request),
+      'folder_update',
+      50, // requests
+      60 * 60 * 1000 // 1 hour window
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '50');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -186,7 +190,7 @@ export async function PUT(
 
     const { name, parentId } = validation.data;
 
-    const updates: { name?: string, parentId?: string } = {};
+    const updates: { name?: string, parentId?: string | null } = {};
     if (name !== undefined) {
       updates.name = sanitizeInput(name.trim());
     }
@@ -194,7 +198,7 @@ export async function PUT(
       updates.parentId = parentId ? sanitizeInput(parentId) : null;
     }
 
-    const folder = await FileStorage.updateFolder(sanitizedFolderId, updates);
+    const folder = await FolderService.updateFolder(sanitizedFolderId, updates);
     
     if (!folder) {
       return addSecurityHeaders(NextResponse.json(
@@ -209,9 +213,9 @@ export async function PUT(
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '50');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
   } catch (error) {
@@ -229,20 +233,23 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'folder_delete');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+  try {    // Apply rate limiting
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      getClientIP(request),
+      'folder_delete',
+      30, // requests
+      60 * 60 * 1000 // 1 hour window
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '30');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -261,18 +268,18 @@ export async function DELETE(
 
     const { id: folderId } = await params;
     const sanitizedFolderId = sanitizeInput(folderId);
-    
-    // Verify access
+      // Verify access
     const auth = await verifyFolderAccess(request, sanitizedFolderId);
     if (!auth.success) {
       return auth.response!;
     }
 
-    const success = await FileStorage.deleteFolder(sanitizedFolderId);
-    
-    if (!success) {
+    try {
+      await FolderService.deleteFolder(sanitizedFolderId);
+    } catch (error) {
+      console.error('Folder deletion error:', error);
       return addSecurityHeaders(NextResponse.json(
-        { error: 'Folder not found' },
+        { error: 'Folder not found or could not be deleted' },
         { status: 404 }
       ));
     }
@@ -282,9 +289,9 @@ export async function DELETE(
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '30');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
   } catch (error) {

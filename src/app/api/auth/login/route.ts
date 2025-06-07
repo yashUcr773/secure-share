@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { AuthService } from '@/lib/auth';
-import { authRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { AuthService } from '@/lib/auth-enhanced';
+import { RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
 
 // Handle CORS preflight requests
@@ -18,22 +18,24 @@ const loginSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'auth_login');
-    const rateLimitResult = await checkRateLimit(request, authRateLimit, identifier);
+    // Apply rate limiting using database
+    const clientIp = request.headers.get('x-forwarded-for') || 
+                    request.headers.get('x-real-ip') || 
+                    'unknown';
+    const identifier = `auth_login:${clientIp}`;
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'login_attempt', 
+      5, 
+      15 * 60 * 1000 // 15 minutes in milliseconds
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many login attempts. Please try again later.' },
         { status: 429 }
-      );
-      
-      // Add rate limit headers
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Validate request origin (CSRF protection)
@@ -53,63 +55,39 @@ export async function POST(request: NextRequest) {
     // Validate input
     const validation = loginSchema.safeParse(body);
     if (!validation.success) {
-      return NextResponse.json(
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Validation failed', details: validation.error.errors },
         { status: 400 }
-      );
-    }    const { email, password } = validation.data;
-
-    // Get user first to check account lockout
-    const user = await AuthService.getUserByEmail(email);
-    if (user && !user.isActive) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'Account is disabled' },
-        { status: 401 }
       ));
     }
 
-    // Check account lockout
-    if (user && await AuthService.checkAccountLockout(user)) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'Account is temporarily locked due to too many failed login attempts. Please try again later.' },
-        { status: 423 }
-      ));
-    }
+    const { email, password } = validation.data;
 
-    // Authenticate user
+    // Attempt login using enhanced auth service
     const result = await AuthService.login(email, password);
     
     if (!result.success) {
-      // Record failed login attempt if user exists
-      if (user) {
-        await AuthService.recordFailedLoginAttempt(user);
-      }
-      
       return addSecurityHeaders(NextResponse.json(
-        { error: result.error },
+        { error: result.error || 'Invalid email or password' },
         { status: 401 }
       ));
     }
 
-    // Clear any previous failed login attempts
-    if (user) {
-      await AuthService.clearLoginAttempts(user);
-    }
-
-    // Generate token pair for session management
-    const tokenPair = await AuthService.generateTokenPair(result.user!);
-
-    // Create response with token
+    // Create response with user data (without sensitive information)
     const response = NextResponse.json(
       { 
         message: 'Login successful',
-        user: { id: result.user!.id, email: result.user!.email }
+        user: { 
+          id: result.user!.id, 
+          email: result.user!.email,
+          name: result.user!.name 
+        }
       },
       { status: 200 }
     );
 
     // Set access token cookie (short-lived)
-    response.cookies.set('auth-token', tokenPair.accessToken, {
+    response.cookies.set('auth-token', result.accessToken!, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
@@ -118,7 +96,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Set refresh token cookie (long-lived)
-    response.cookies.set('refresh-token', tokenPair.refreshToken, {
+    response.cookies.set('refresh-token', result.refreshToken!, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
@@ -126,19 +104,13 @@ export async function POST(request: NextRequest) {
       path: '/'
     });
 
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
-
     return addSecurityHeaders(response);
 
   } catch (error) {
     console.error('Login error:', error);
-    const response = NextResponse.json(
+    return addSecurityHeaders(NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
-    return addSecurityHeaders(response);
+    ));
   }
 }

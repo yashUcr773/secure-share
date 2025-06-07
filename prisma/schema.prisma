@@ -1,0 +1,129 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User model for authentication and profile data
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  passwordHash String
+  name        String?
+  isActive    Boolean  @default(true)
+  emailVerified Boolean @default(false)
+  emailVerificationToken String?
+  emailVerificationTokenExpiry DateTime?
+  passwordResetToken String?
+  passwordResetTokenExpiry DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  files       File[]
+  folders     Folder[]
+  sharedLinks SharedLink[]
+  sessions    Session[]
+  
+  @@map("users")
+}
+
+// Session model for JWT token management and revocation
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  token       String   @unique
+  expiresAt   DateTime
+  isRevoked   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("sessions")
+}
+
+// File model for encrypted file storage
+model File {
+  id                  String   @id @default(cuid())
+  fileName            String
+  fileSize            Int
+  encryptedContent    String   // Base64 encoded encrypted content
+  salt                String   // Encryption salt
+  iv                  String   // Initialization vector
+  key                 String?  // Encryption key (null if password protected)
+  isPasswordProtected Boolean  @default(false)
+  folderId            String?
+  userId              String?  // Optional for anonymous uploads
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  // Relations
+  user                User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder              Folder?     @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  sharedLinks         SharedLink[]
+  
+  @@map("files")
+}
+
+// Folder model for file organization
+model Folder {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  parentId    String?
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent      Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id])
+  children    Folder[] @relation("FolderHierarchy")
+  files       File[]
+  
+  @@map("folders")
+}
+
+// SharedLink model for file sharing analytics
+model SharedLink {
+  id          String   @id @default(cuid())
+  fileId      String   @unique
+  userId      String
+  isActive    Boolean  @default(true)
+  expiresAt   DateTime?
+  views       Int      @default(0)
+  downloads   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  file        File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("shared_links")
+}
+
+// RateLimitEntry model for rate limiting tracking
+model RateLimitEntry {
+  id          String   @id @default(cuid())
+  identifier  String   // IP address or user ID
+  action      String   // upload, download, etc.
+  count       Int      @default(1)
+  windowStart DateTime
+  expiresAt   DateTime
+  
+  @@unique([identifier, action, windowStart])
+  @@map("rate_limit_entries")
+}

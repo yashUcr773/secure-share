@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { AuthService } from '@/lib/auth';
-import { authRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { AuthService } from '@/lib/auth-enhanced';
+import { RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 
 // Handle CORS preflight requests
@@ -23,20 +23,23 @@ const signupSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     // Apply rate limiting for signup
-    const identifier = createRateLimitIdentifier(request, 'auth_signup');
-    const rateLimitResult = await checkRateLimit(request, authRateLimit, identifier);
+    const clientIp = request.headers.get('x-forwarded-for') || 
+                    request.headers.get('x-real-ip') || 
+                    'unknown';
+    const identifier = `auth_signup:${clientIp}`;
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'signup_attempt', 
+      3, 
+      60 * 60 * 1000 // 3 attempts per hour
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many signup attempts. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Validate request origin (CSRF protection)
@@ -65,7 +68,9 @@ export async function POST(request: NextRequest) {
     const { email, password } = validation.data;
 
     // Sanitize email input
-    const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());    // Create user account
+    const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
+
+    // Create user account
     const result = await AuthService.register(sanitizedEmail, password);
     
     if (!result.success) {
@@ -75,36 +80,25 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    // Initiate email verification for new user
-    const verificationResult = await AuthService.initiateEmailVerification(result.user!.id);
-    
-    if (!verificationResult.success) {
-      console.error('Failed to send verification email:', verificationResult.error);
-      // Continue with signup success even if email fails
-    }
-
     const response = NextResponse.json(
       { 
-        message: 'Account created successfully! Please check your email to verify your account before logging in.',
-        user: { id: result.user!.id, email: result.user!.email },
-        emailVerificationSent: verificationResult.success
+        message: 'Account created successfully! You can now log in.',
+        user: { 
+          id: result.user!.id, 
+          email: result.user!.email,
+          name: result.user!.name 
+        }
       },
       { status: 201 }
     );
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
 
     return addSecurityHeaders(response);
 
   } catch (error) {
     console.error('Signup error:', error);
-    const response = NextResponse.json(
+    return addSecurityHeaders(NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
-    return addSecurityHeaders(response);
+    ));
   }
 }

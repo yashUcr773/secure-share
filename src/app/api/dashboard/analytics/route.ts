@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { FileStorage } from '@/lib/storage';
-import { EdgeAuthService } from '@/lib/auth-edge';
-import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { FileService, SharedLinkService, RateLimitService } from '@/lib/database';
+import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 
 // Handle CORS preflight requests
@@ -14,18 +13,22 @@ export async function OPTIONS(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'analytics');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'analytics',
+      request.ip || 'unknown',
+      10, // 10 requests
+      900 // per 15 minutes
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '10');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -50,19 +53,16 @@ export async function GET(request: NextRequest) {
         { error: 'Authentication required' },
         { status: 401 }
       ));
-    }
-
-    let userId = 'anonymous';
+    }    let userId: string;
     try {
-      const payload = await EdgeAuthService.verifyToken(token);
-      if (payload) {
-        userId = payload.userId;
-      } else {
+      const verification = await AuthService.verifyToken(token);
+      if (!verification.valid || !verification.user) {
         return addSecurityHeaders(NextResponse.json(
           { error: 'Invalid token' },
           { status: 401 }
         ));
       }
+      userId = verification.user.id;
     } catch (error) {
       console.error('Token verification failed:', error);
       return addSecurityHeaders(NextResponse.json(
@@ -74,38 +74,39 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const timeRange = sanitizeInput(searchParams.get('timeRange') || '30d');
     
-    // Get user's shared links for analytics
-    const sharedLinks = await FileStorage.getUserSharedLinks(userId);
-    const userFiles = await FileStorage.getUserFiles(userId);
+    // Get user's shared links and files for analytics
+    const [sharedLinks, userFiles] = await Promise.all([
+      SharedLinkService.getUserSharedLinks(userId),
+      FileService.getUserFiles(userId)
+    ]);
     
     // Calculate analytics
-    const totalViews = sharedLinks.reduce((sum, link) => sum + link.views, 0);
-    const totalDownloads = sharedLinks.reduce((sum, link) => sum + link.downloads, 0);
+    const totalViews = sharedLinks.reduce((sum: number, link) => sum + (link.views || 0), 0);
+    const totalDownloads = sharedLinks.reduce((sum: number, link) => sum + (link.downloads || 0), 0);
     const totalShares = sharedLinks.length;
     const activeLinks = sharedLinks.filter(link => 
       link.isActive && (!link.expiresAt || new Date(link.expiresAt) > new Date())
     ).length;
-    
-    // Generate mock recent activity based on real files
+      // Generate recent activity based on real shared links
     const recentActivity = sharedLinks
       .slice(0, 10)
       .map((link, index) => ({
         id: `activity-${index}`,
         type: index % 3 === 0 ? 'view' : index % 3 === 1 ? 'download' : 'share',
-        fileName: link.fileName,
+        fileName: (link as any).file?.fileName || 'Unknown File',
         timestamp: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
         userAgent: ['Chrome on Windows', 'Safari on macOS', 'Firefox on Linux'][index % 3],
       }));
     
     // Popular files based on actual analytics
     const popularFiles = sharedLinks
-      .sort((a, b) => (b.views + b.downloads) - (a.views + a.downloads))
+      .sort((a, b) => ((b.views || 0) + (b.downloads || 0)) - ((a.views || 0) + (a.downloads || 0)))
       .slice(0, 5)
       .map(link => ({
         id: link.id,
-        fileName: link.fileName,
-        views: link.views,
-        downloads: link.downloads,
+        fileName: (link as any).file?.fileName || 'Unknown File',
+        views: link.views || 0,
+        downloads: link.downloads || 0,
         shares: 1, // Each shared link represents one share
       }));
     
@@ -129,15 +130,17 @@ export async function GET(request: NextRequest) {
       recentActivity,
       popularFiles,
       viewsOverTime,
-    };    const response = NextResponse.json({
+    };
+
+    const response = NextResponse.json({
       success: true,
       analytics: analyticsData,
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '10');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
 

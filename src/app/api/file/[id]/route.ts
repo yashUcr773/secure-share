@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { FileStorage } from '@/lib/storage';
-import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { FileService, SharedLinkService, RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 
 // Handle CORS preflight requests
@@ -21,18 +20,22 @@ export async function GET(
 ) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'file_access');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'file_access',
+      request.ip || 'unknown',
+      30, // 30 requests
+      900 // per 15 minutes
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '30');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -49,7 +52,7 @@ export async function GET(
     // Sanitize file ID to prevent injection attacks
     const sanitizedFileId = sanitizeInput(fileId);
 
-    const fileData = await FileStorage.getFileMetadata(sanitizedFileId);
+    const fileData = await FileService.getFileMetadata(sanitizedFileId);
     
     if (!fileData) {
       return addSecurityHeaders(NextResponse.json(
@@ -59,7 +62,12 @@ export async function GET(
     }
 
     // Update view count for shared link analytics
-    await FileStorage.updateSharedLinkAnalytics(sanitizedFileId, 'view');
+    try {
+      await SharedLinkService.updateAnalytics(sanitizedFileId, 'view');
+    } catch (error) {
+      // Analytics update failure shouldn't break file access
+      console.warn('Failed to update analytics:', error);
+    }
 
     // Return file metadata (without the actual encrypted content for security)
     const response = NextResponse.json({
@@ -75,9 +83,9 @@ export async function GET(
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '30');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
 
@@ -98,18 +106,22 @@ export async function POST(
 ) {
   try {
     // Apply rate limiting for content access
-    const identifier = createRateLimitIdentifier(request, 'file_download');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'file_download',
+      request.ip || 'unknown',
+      10, // 10 requests
+      900 // per 15 minutes
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many download requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '10');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -151,7 +163,7 @@ export async function POST(
 
     const { password } = validation.data;
 
-    const fileData = await FileStorage.getFile(sanitizedFileId);
+    const fileData = await FileService.getFile(sanitizedFileId);
     
     if (!fileData) {
       return addSecurityHeaders(NextResponse.json(
@@ -169,7 +181,12 @@ export async function POST(
     }
 
     // Update download count for shared link analytics when content is accessed
-    await FileStorage.updateSharedLinkAnalytics(sanitizedFileId, 'download');
+    try {
+      await SharedLinkService.updateAnalytics(sanitizedFileId, 'download');
+    } catch (error) {
+      // Analytics update failure shouldn't break file download
+      console.warn('Failed to update download analytics:', error);
+    }
 
     // Return the encrypted content for client-side decryption
     const response = NextResponse.json({
@@ -180,9 +197,9 @@ export async function POST(
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '10');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { AuthService } from '@/lib/auth-enhanced';
+import { RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
 
 // Handle CORS preflight requests
@@ -11,20 +12,23 @@ export async function OPTIONS(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'auth_logout');
-    const rateLimitResult = await checkRateLimit(request, authRateLimit, identifier);
+    const clientIp = request.headers.get('x-forwarded-for') || 
+                    request.headers.get('x-real-ip') || 
+                    'unknown';
+    const identifier = `auth_logout:${clientIp}`;
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'logout_attempt', 
+      20, 
+      5 * 60 * 1000 // 20 attempts per 5 minutes (generous for logout)
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many logout attempts. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Validate request origin (CSRF protection)
@@ -37,7 +41,22 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid request origin' },
         { status: 403 }
       ));
-    }    // Create response
+    }
+
+    // Get refresh token from cookies to revoke session
+    const refreshToken = request.cookies.get('refresh-token')?.value;
+    
+    if (refreshToken) {
+      // Revoke the session using the refresh token
+      try {
+        await AuthService.revokeToken(refreshToken);
+      } catch (error) {
+        console.error('Failed to revoke session:', error);
+        // Continue with logout even if revocation fails
+      }
+    }
+
+    // Create response
     const response = NextResponse.json(
       { message: 'Logout successful' },
       { status: 200 }
@@ -48,7 +67,8 @@ export async function POST(request: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 0 // Expire immediately
+      maxAge: 0, // Expire immediately
+      path: '/'
     });
 
     // Clear the refresh token cookie
@@ -56,22 +76,17 @@ export async function POST(request: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 0 // Expire immediately
-    });
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
+      maxAge: 0, // Expire immediately
+      path: '/'
     });
 
     return addSecurityHeaders(response);
 
   } catch (error) {
     console.error('Logout error:', error);
-    const response = NextResponse.json(
+    return addSecurityHeaders(NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
-    return addSecurityHeaders(response);
+    ));
   }
 }

@@ -2,7 +2,8 @@
 // Allows users to request a new verification email
 
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/auth';
+import { AuthService } from '@/lib/auth-enhanced';
+import { UserService } from '@/lib/database';
 import { addSecurityHeaders, sanitizeInput, validateOrigin } from '@/lib/security';
 import { checkRateLimit, createRateLimitIdentifier } from '@/lib/rate-limit';
 import { z } from 'zod';
@@ -65,10 +66,8 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const { email } = validation.data;
-
-    // Get user by email
-    const user = await AuthService.getUserByEmail(email);
+    const { email } = validation.data;    // Get user by email
+    const user = await UserService.getUserByEmail(email);
     
     if (!user || !user.isActive) {
       // Don't reveal if email exists for security

@@ -2,7 +2,7 @@
 // Handles password reset with tokens
 
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/auth';
+import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, sanitizeInput, validatePassword } from '@/lib/security';
 import { checkRateLimit, createRateLimitIdentifier } from '@/lib/rate-limit';
 import { z } from 'zod';

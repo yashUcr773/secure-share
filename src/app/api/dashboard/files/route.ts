@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { FileStorage } from '@/lib/storage';
-import { EdgeAuthService } from '@/lib/auth-edge';
-import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { FileService, RateLimitService } from '@/lib/database';
+import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
 
 // Handle CORS preflight requests
@@ -14,20 +13,23 @@ export async function OPTIONS(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'dashboard');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const clientIp = request.headers.get('x-forwarded-for') || 
+                    request.headers.get('x-real-ip') || 
+                    'unknown';
+    const identifier = `dashboard_files:${clientIp}`;
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'files_request', 
+      50, 
+      60 * 1000 // 50 requests per minute
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Authentication check
@@ -40,46 +42,32 @@ export async function GET(request: NextRequest) {
       ));
     }
 
-    let userId = 'anonymous';
-    try {
-      const payload = await EdgeAuthService.verifyToken(token);
-      if (payload) {
-        userId = payload.userId;
-      } else {
-        return addSecurityHeaders(NextResponse.json(
-          { error: 'Invalid token' },
-          { status: 401 }
-        ));
-      }
-    } catch (error) {
-      console.error('Token verification failed:', error);
+    // Verify token using enhanced auth service
+    const verificationResult = await AuthService.verifyToken(token);
+    
+    if (!verificationResult.valid || !verificationResult.user) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid token' },
         { status: 401 }
       ));
     }
+
+    const userId = verificationResult.user.id;
     
-    const files = await FileStorage.getUserFiles(userId);
+    // Get user's files from database
+    const files = await FileService.getUserFiles(userId);
     
-    const response = NextResponse.json({
+    return addSecurityHeaders(NextResponse.json({
       success: true,
       files,
-    });
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
-
-    return addSecurityHeaders(response);
+    }));
 
   } catch (error) {
     console.error('Dashboard files error:', error);
-    const response = NextResponse.json(
+    return addSecurityHeaders(NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
-    return addSecurityHeaders(response);
+    ));
   }
 }
 
@@ -87,20 +75,23 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'dashboard_delete');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const clientIp = request.headers.get('x-forwarded-for') || 
+                    request.headers.get('x-real-ip') || 
+                    'unknown';
+    const identifier = `dashboard_delete:${clientIp}`;
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'delete_request', 
+      10, 
+      60 * 1000 // 10 deletes per minute
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Validate request origin (CSRF protection)
@@ -125,68 +116,51 @@ export async function DELETE(request: NextRequest) {
       ));
     }
 
-    let userId = 'anonymous';
-    try {
-      const payload = await EdgeAuthService.verifyToken(token);
-      if (payload) {
-        userId = payload.userId;
-      } else {
-        return addSecurityHeaders(NextResponse.json(
-          { error: 'Invalid token' },
-          { status: 401 }
-        ));
-      }
-    } catch (error) {
-      console.error('Token verification failed:', error);
+    // Verify token using enhanced auth service
+    const verificationResult = await AuthService.verifyToken(token);
+    
+    if (!verificationResult.valid || !verificationResult.user) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid token' },
         { status: 401 }
       ));
     }
 
+    const userId = verificationResult.user.id;
+
     const { searchParams } = new URL(request.url);
     const fileId = searchParams.get('id');
-      if (!fileId) {
+    
+    if (!fileId) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'File ID is required' },
         { status: 400 }
       ));
-    }    // Verify user owns this file before deletion
-    const ownsFile = await FileStorage.verifyFileOwnership(fileId, userId);
-    if (!ownsFile) {
+    }
+
+    // Get file to verify ownership
+    const file = await FileService.getFileMetadata(fileId);
+    
+    if (!file || file.userId !== userId) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'File not found or access denied' },
         { status: 404 }
       ));
     }
 
-    const deleted = await FileStorage.deleteFile(fileId);
+    // Delete the file
+    await FileService.deleteFile(fileId);
     
-    if (!deleted) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'File not found' },
-        { status: 404 }
-      ));
-    }
-
-    const response = NextResponse.json({
+    return addSecurityHeaders(NextResponse.json({
       success: true,
       message: 'File deleted successfully',
-    });
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
-
-    return addSecurityHeaders(response);
+    }));
 
   } catch (error) {
     console.error('Delete file error:', error);
-    const response = NextResponse.json(
+    return addSecurityHeaders(NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
-    return addSecurityHeaders(response);
+    ));
   }
 }

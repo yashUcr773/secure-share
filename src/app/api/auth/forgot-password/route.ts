@@ -2,17 +2,11 @@
 // Handles password reset requests
 
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/auth';
+import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, sanitizeInput, validateEmail } from '@/lib/security';
-import { checkRateLimit, createRateLimitIdentifier } from '@/lib/rate-limit';
+import { RateLimitService } from '@/lib/database';
+import { getClientIP } from '@/lib/rate-limit';
 import { z } from 'zod';
-
-// Rate limiting - very restrictive for password reset requests
-const passwordResetRateLimit = {
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // 3 attempts per hour
-  message: 'Too many password reset requests'
-};
 
 // Validation schema
 const forgotPasswordSchema = z.object({
@@ -21,19 +15,21 @@ const forgotPasswordSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'forgot_password');
-    const rateLimitResult = await checkRateLimit(request, passwordResetRateLimit, identifier);
+    // Apply rate limiting using database - very restrictive for password reset requests
+    const clientIp = getClientIP(request);
+    const identifier = `forgot_password:${clientIp}`;
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'password_reset', 
+      3, // 3 attempts
+      60 * 60 * 1000 // per hour
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many password reset requests. Please try again later.' },
         { status: 429 }
       );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
       
       return addSecurityHeaders(response);
     }

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { FileStorage } from '@/lib/storage';
-import { EdgeAuthService } from '@/lib/auth-edge';
-import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { SharedLinkService, RateLimitService } from '@/lib/database';
+import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 
 // Validation schema for shared link creation
@@ -21,18 +20,22 @@ export async function OPTIONS(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'shared_links');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'shared_links',
+      request.ip || 'unknown',
+      20, // 20 requests
+      900 // per 15 minutes
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '20');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -59,17 +62,16 @@ export async function GET(request: NextRequest) {
       ));
     }
 
-    let userId = 'anonymous';
+    let userId: string;
     try {
-      const payload = await EdgeAuthService.verifyToken(token);
-      if (payload) {
-        userId = payload.userId;
-      } else {
+      const verification = await AuthService.verifyToken(token);
+      if (!verification.valid || !verification.user) {
         return addSecurityHeaders(NextResponse.json(
           { error: 'Invalid token' },
           { status: 401 }
         ));
       }
+      userId = verification.user.id;
     } catch (error) {
       console.error('Token verification failed:', error);
       return addSecurityHeaders(NextResponse.json(
@@ -78,7 +80,7 @@ export async function GET(request: NextRequest) {
       ));
     }
 
-    const sharedLinks = await FileStorage.getUserSharedLinks(userId);
+    const sharedLinks = await SharedLinkService.getUserSharedLinks(userId);
     
     const response = NextResponse.json({
       success: true,
@@ -86,9 +88,9 @@ export async function GET(request: NextRequest) {
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '20');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
 
@@ -106,18 +108,22 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'create_shared_link');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'create_shared_link',
+      request.ip || 'unknown',
+      10, // 10 requests
+      3600 // per hour
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '10');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -144,17 +150,16 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    let userId = 'anonymous';
+    let userId: string;
     try {
-      const payload = await EdgeAuthService.verifyToken(token);
-      if (payload) {
-        userId = payload.userId;
-      } else {
+      const verification = await AuthService.verifyToken(token);
+      if (!verification.valid || !verification.user) {
         return addSecurityHeaders(NextResponse.json(
           { error: 'Invalid token' },
           { status: 401 }
         ));
       }
+      userId = verification.user.id;
     } catch (error) {
       console.error('Token verification failed:', error);
       return addSecurityHeaders(NextResponse.json(
@@ -179,41 +184,28 @@ export async function POST(request: NextRequest) {
     // Sanitize file ID
     const sanitizedFileId = sanitizeInput(fileId);
 
-    // Verify user owns this file
-    const userFiles = await FileStorage.getUserFiles(userId);
-    const fileExists = userFiles.some(file => file.id === sanitizedFileId);
+    // Create shared link using database service
+    const sharedLink = await SharedLinkService.createSharedLink({
+      fileId: sanitizedFileId,
+      userId,
+      expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+    });
     
-    if (!fileExists) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'File not found or access denied' },
-        { status: 404 }
-      ));
-    }
-
-    const sharedLink = await FileStorage.createSharedLink(sanitizedFileId, userId, expiresAt);
-    
-    if (!sharedLink) {
-      return addSecurityHeaders(NextResponse.json(
-        { error: 'Failed to create shared link' },
-        { status: 500 }
-      ));
-    }
-
     const response = NextResponse.json({
       success: true,
       sharedLink,
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '10');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
 
   } catch (error) {
     console.error('Create shared link error:', error);
-    if (error instanceof Error && error.message === 'File not found') {
+    if (error instanceof Error && error.message.includes('File not found')) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'File not found' },
         { status: 404 }
@@ -231,18 +223,22 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'delete_shared_link');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'delete_shared_link',
+      request.ip || 'unknown',
+      20, // 20 requests
+      900 // per 15 minutes
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '20');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -269,26 +265,23 @@ export async function DELETE(request: NextRequest) {
       ));
     }
 
-    let userId = 'anonymous';
+    let userId: string;
     try {
-      const payload = await EdgeAuthService.verifyToken(token);
-      if (payload) {
-        userId = payload.userId;
-      } else {
+      const verification = await AuthService.verifyToken(token);
+      if (!verification.valid || !verification.user) {
         return addSecurityHeaders(NextResponse.json(
           { error: 'Invalid token' },
           { status: 401 }
         ));
       }
+      userId = verification.user.id;
     } catch (error) {
       console.error('Token verification failed:', error);
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid token' },
         { status: 401 }
       ));
-    }
-
-    const { searchParams } = new URL(request.url);
+    }    const { searchParams } = new URL(request.url);
     const fileId = searchParams.get('id');
     
     if (!fileId) {
@@ -301,9 +294,9 @@ export async function DELETE(request: NextRequest) {
     // Sanitize file ID
     const sanitizedFileId = sanitizeInput(fileId);
 
-    // Verify user owns this shared link
-    const userSharedLinks = await FileStorage.getUserSharedLinks(userId);
-    const linkExists = userSharedLinks.some(link => link.fileId === sanitizedFileId);
+    // Verify user owns this shared link by checking their shared links
+    const userSharedLinks = await SharedLinkService.getUserSharedLinks(userId);
+    const linkExists = userSharedLinks.some((link: any) => link.fileId === sanitizedFileId);
     
     if (!linkExists) {
       return addSecurityHeaders(NextResponse.json(
@@ -312,9 +305,10 @@ export async function DELETE(request: NextRequest) {
       ));
     }
 
-    const deleted = await FileStorage.deleteSharedLink(sanitizedFileId);
-    
-    if (!deleted) {
+    // Delete shared link using database service
+    try {
+      await SharedLinkService.deleteSharedLink(sanitizedFileId);
+    } catch (error) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Shared link not found' },
         { status: 404 }
@@ -327,9 +321,9 @@ export async function DELETE(request: NextRequest) {
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '20');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
 

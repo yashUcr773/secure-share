@@ -2,34 +2,30 @@
 // Handles access token refresh using refresh tokens
 
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/auth';
+import { AuthService } from '@/lib/auth-enhanced';
+import { RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin } from '@/lib/security';
-import { checkRateLimit, createRateLimitIdentifier } from '@/lib/rate-limit';
-
-// Rate limiting for token refresh
-const refreshRateLimit = {
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 10, // 10 refresh attempts per window
-  message: 'Too many token refresh requests'
-};
 
 export async function POST(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'token_refresh');
-    const rateLimitResult = await checkRateLimit(request, refreshRateLimit, identifier);
+    const clientIp = request.headers.get('x-forwarded-for') || 
+                    request.headers.get('x-real-ip') || 
+                    'unknown';
+    const identifier = `token_refresh:${clientIp}`;
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'refresh_attempt', 
+      10, 
+      5 * 60 * 1000 // 10 attempts per 5 minutes
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many token refresh requests. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Validate request origin (CSRF protection)
@@ -57,7 +53,7 @@ export async function POST(request: NextRequest) {
     // Refresh the access token
     const result = await AuthService.refreshToken(refreshToken);
     
-    if (!result.success) {
+    if (!result.accessToken) {
       // Clear refresh token cookie if refresh failed
       const response = NextResponse.json(
         { error: result.error || 'Token refresh failed' },
@@ -97,11 +93,6 @@ export async function POST(request: NextRequest) {
       sameSite: 'strict',
       maxAge: 15 * 60, // 15 minutes (matching token expiry)
       path: '/'
-    });
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
     });
 
     return addSecurityHeaders(response);

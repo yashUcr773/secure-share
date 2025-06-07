@@ -2,9 +2,9 @@
 // Handles email verification with tokens
 
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/auth';
+import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders } from '@/lib/security';
-import { checkRateLimit, createRateLimitIdentifier } from '@/lib/rate-limit';
+import { RateLimitService } from '@/lib/database';
 import { sanitizeInput } from '@/lib/security';
 import { z } from 'zod';
 
@@ -22,19 +22,23 @@ const verificationSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'email_verification');
-    const rateLimitResult = await checkRateLimit(request, verificationRateLimit, identifier);
+    // Apply rate limiting using database service
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'email_verification',
+      request.ip || 'unknown',
+      5, // max attempts
+      15 * 60 * 1000 // 15 minutes window
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many verification attempts. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '5');
+      response.headers.set('X-RateLimit-Remaining', '0');
+      response.headers.set('X-RateLimit-Reset', new Date(Date.now() + (15 * 60 * 1000)).toISOString());
       
       return addSecurityHeaders(response);
     }
@@ -75,9 +79,9 @@ export async function POST(request: NextRequest) {
     );
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '5');
+    response.headers.set('X-RateLimit-Remaining', String(rateLimitResult.remaining));
+    response.headers.set('X-RateLimit-Reset', new Date(rateLimitResult.resetTime).toISOString());
 
     return addSecurityHeaders(response);
 
@@ -104,19 +108,23 @@ export async function GET(request: NextRequest) {
       ));
     }
 
-    // Apply rate limiting for GET requests too
-    const identifier = createRateLimitIdentifier(request, 'email_verification_get');
-    const rateLimitResult = await checkRateLimit(request, verificationRateLimit, identifier);
+    // Apply rate limiting using database service
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'email_verification_get',
+      request.ip || 'unknown',
+      5, // max attempts
+      15 * 60 * 1000 // 15 minutes window
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many verification attempts. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '5');
+      response.headers.set('X-RateLimit-Remaining', '0');
+      response.headers.set('X-RateLimit-Reset', new Date(Date.now() + (15 * 60 * 1000)).toISOString());
       
       return addSecurityHeaders(response);
     }
@@ -143,9 +151,9 @@ export async function GET(request: NextRequest) {
     );
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '5');
+    response.headers.set('X-RateLimit-Remaining', String(rateLimitResult.remaining));
+    response.headers.set('X-RateLimit-Reset', new Date(rateLimitResult.resetTime).toISOString());
 
     return addSecurityHeaders(response);
 

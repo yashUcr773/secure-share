@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { FileStorage } from '@/lib/storage';
-import { EdgeAuthService } from '@/lib/auth-edge';
-import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
+import { FolderService, RateLimitService } from '@/lib/database';
+import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 
 // Handle CORS preflight requests
@@ -21,18 +20,22 @@ const createFolderSchema = z.object({
 export async function GET(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'folders');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'folders',
+      request.ip || 'unknown',
+      30, // 30 requests
+      900 // per 15 minutes
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '30');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -47,17 +50,16 @@ export async function GET(request: NextRequest) {
       ));
     }
 
-    let userId = 'anonymous';
+    let userId: string;
     try {
-      const payload = await EdgeAuthService.verifyToken(token);
-      if (payload) {
-        userId = payload.userId;
-      } else {
+      const verification = await AuthService.verifyToken(token);
+      if (!verification.valid || !verification.user) {
         return addSecurityHeaders(NextResponse.json(
           { error: 'Invalid token' },
           { status: 401 }
         ));
       }
+      userId = verification.user.id;
     } catch (error) {
       console.error('Token verification failed:', error);
       return addSecurityHeaders(NextResponse.json(
@@ -66,7 +68,7 @@ export async function GET(request: NextRequest) {
       ));
     }
     
-    const folders = await FileStorage.getUserFolders(userId);
+    const folders = await FolderService.getUserFolders(userId);
     
     const response = NextResponse.json({
       folders,
@@ -74,9 +76,9 @@ export async function GET(request: NextRequest) {
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '30');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
   } catch (error) {
@@ -93,18 +95,22 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'folder_create');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      'folder_create',
+      request.ip || 'unknown',
+      10, // 10 requests
+      3600 // per hour
+    );
     
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       const response = NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
       
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
+      response.headers.set('X-RateLimit-Limit', '10');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
       
       return addSecurityHeaders(response);
     }
@@ -131,8 +137,18 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const payload = await EdgeAuthService.verifyToken(token);
-    if (!payload) {
+    let userId: string;
+    try {
+      const verification = await AuthService.verifyToken(token);
+      if (!verification.valid || !verification.user) {
+        return addSecurityHeaders(NextResponse.json(
+          { error: 'Invalid token' },
+          { status: 401 }
+        ));
+      }
+      userId = verification.user.id;
+    } catch (error) {
+      console.error('Token verification failed:', error);
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid token' },
         { status: 401 }
@@ -149,10 +165,10 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const folder = await FileStorage.createFolder({
+    const folder = await FolderService.createFolder({
       name: name.trim(),
       parentId: parentId || null,
-      userId: payload.userId,
+      userId,
     });
 
     const response = NextResponse.json({
@@ -161,9 +177,9 @@ export async function POST(request: NextRequest) {
     });
 
     // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    response.headers.set('X-RateLimit-Limit', '10');
+    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
     return addSecurityHeaders(response);
   } catch (error) {
