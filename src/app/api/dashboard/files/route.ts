@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FileService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
+import { CacheService } from '@/lib/cache';
+import { CompressionService } from '@/lib/compression';
+import { CDNService } from '@/lib/cdn';
+import { JobQueue } from '@/lib/job-queue';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -12,11 +16,12 @@ export async function OPTIONS(request: NextRequest) {
 // GET /api/dashboard/files - Get all files for the current user
 export async function GET(request: NextRequest) {
   try {
+    // Extract IP address properly for NextRequest
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     // Apply rate limiting
-    const clientIp = request.headers.get('x-forwarded-for') || 
-                    request.headers.get('x-real-ip') || 
-                    'unknown';
-    const identifier = `dashboard_files:${clientIp}`;
+    const identifier = `dashboard_files:${ip}`;
     
     const rateLimitResult = await RateLimitService.checkRateLimit(
       identifier, 
@@ -53,14 +58,77 @@ export async function GET(request: NextRequest) {
     }
 
     const userId = verificationResult.user.id;
+      // Check cache first
+    const cacheKey = `dashboard_files:${userId}`;
+    const cachedFiles = await CacheService.get(cacheKey);
     
-    // Get user's files from database
-    const files = await FileService.getUserFiles(userId);
+    let files;
+    let isFromCache = false;
+    if (cachedFiles && cachedFiles.data) {
+      files = cachedFiles.data;
+      isFromCache = true;
+    } else {
+      // Get user's files from database
+      files = await FileService.getUserFiles(userId);
+      
+      // Cache the result for 5 minutes
+      await CacheService.set(cacheKey, files, 5 * 60);
+    }
     
-    return addSecurityHeaders(NextResponse.json({
+    // Prepare response data
+    const responseData = {
       success: true,
       files,
-    }));
+      cached: isFromCache,
+      timestamp: new Date().toISOString()
+    };// Compress response if it's large
+    const responseText = JSON.stringify(responseData);
+    let finalResponse;
+    
+    if (responseText.length > 1024) { // Compress if larger than 1KB
+      try {
+        const compressionResult = await CompressionService.compress(
+          responseText, 
+          { mimeType: 'application/json' }
+        );
+        
+        const response = new NextResponse(compressionResult.compressed.toString(), { status: 200 });
+        response.headers.set('Content-Type', 'application/json');
+        response.headers.set('Content-Encoding', 'gzip');
+        response.headers.set('X-Compression-Ratio', compressionResult.compressionRatio.toString());
+        response.headers.set('X-Cache-Status', isFromCache ? 'HIT' : 'MISS');
+        
+        finalResponse = response;
+      } catch (compressionError) {
+        console.warn('Compression failed, serving uncompressed:', compressionError);
+        finalResponse = NextResponse.json(responseData);
+      }
+    } else {
+      finalResponse = NextResponse.json(responseData);
+      finalResponse.headers.set('X-Cache-Status', isFromCache ? 'HIT' : 'MISS');
+    }    // Add CDN optimization headers
+    const cdnUrl = CDNService.getCDNUrl('/api/dashboard/files', { 
+      type: 'api',
+      optimization: true
+    });
+    if (cdnUrl) {
+      finalResponse.headers.set('X-CDN-URL', cdnUrl);
+    }
+
+    // Queue analytics job (async)
+    const jobQueue = JobQueue.getInstance();
+    jobQueue.addJob('analytics-processing', {
+      type: 'dashboard_files_view',
+      userId,
+      ip,
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString(),
+      fileCount: Array.isArray(files) ? files.length : 0
+    }).catch(error => {
+      console.warn('Failed to queue analytics job:', error);
+    });
+
+    return addSecurityHeaders(finalResponse);
 
   } catch (error) {
     console.error('Dashboard files error:', error);

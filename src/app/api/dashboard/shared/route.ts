@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { SharedLinkService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+import { CacheService } from '@/lib/cache';
+import { CompressionService } from '@/lib/compression';
+import { CDNService } from '@/lib/cdn';
+import { JobQueue } from '@/lib/job-queue';
 
 // Validation schema for shared link creation
 const createSharedLinkSchema = z.object({
@@ -19,10 +23,14 @@ export async function OPTIONS(request: NextRequest) {
 // GET /api/dashboard/shared - Get all shared links for the current user
 export async function GET(request: NextRequest) {
   try {
+    // Extract IP address properly for NextRequest
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     // Apply rate limiting
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'shared_links',
-      request.ip || 'unknown',
+      ip,
       20, // 20 requests
       900 // per 15 minutes
     );
@@ -60,9 +68,7 @@ export async function GET(request: NextRequest) {
         { error: 'Authentication required' },
         { status: 401 }
       ));
-    }
-
-    let userId: string;
+    }    let userId: string;
     try {
       const verification = await AuthService.verifyToken(token);
       if (!verification.valid || !verification.user) {
@@ -80,19 +86,86 @@ export async function GET(request: NextRequest) {
       ));
     }
 
-    const sharedLinks = await SharedLinkService.getUserSharedLinks(userId);
+    // Check cache first
+    const cacheKey = `dashboard_shared:${userId}`;
+    const cachedData = await CacheService.get(cacheKey);
     
-    const response = NextResponse.json({
+    let sharedLinks;
+    let isFromCache = false;
+    if (cachedData && cachedData.data) {
+      sharedLinks = cachedData.data;
+      isFromCache = true;
+    } else {
+      // Get user's shared links from database
+      sharedLinks = await SharedLinkService.getUserSharedLinks(userId);
+      
+      // Cache the result for 3 minutes (shorter than files as this changes more frequently)
+      await CacheService.set(cacheKey, sharedLinks, 3 * 60);
+    }
+
+    // Prepare response data
+    const responseData = {
       success: true,
       sharedLinks,
-    });
+      cached: isFromCache,
+      timestamp: new Date().toISOString()
+    };
+
+    // Compress response if it's large
+    const responseText = JSON.stringify(responseData);
+    let finalResponse;
+    
+    if (responseText.length > 1024) { // Compress if larger than 1KB
+      try {
+        const compressionResult = await CompressionService.compress(
+          responseText, 
+          { mimeType: 'application/json' }
+        );
+        
+        const response = new NextResponse(compressionResult.compressed.toString(), { status: 200 });
+        response.headers.set('Content-Type', 'application/json');
+        response.headers.set('Content-Encoding', 'gzip');
+        response.headers.set('X-Compression-Ratio', compressionResult.compressionRatio.toString());
+        response.headers.set('X-Cache-Status', isFromCache ? 'HIT' : 'MISS');
+        
+        finalResponse = response;
+      } catch (compressionError) {
+        console.warn('Compression failed, serving uncompressed:', compressionError);
+        finalResponse = NextResponse.json(responseData);
+      }
+    } else {
+      finalResponse = NextResponse.json(responseData);
+      finalResponse.headers.set('X-Cache-Status', isFromCache ? 'HIT' : 'MISS');
+    }
 
     // Add rate limit headers
-    response.headers.set('X-RateLimit-Limit', '20');
-    response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
-    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+    finalResponse.headers.set('X-RateLimit-Limit', '20');
+    finalResponse.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+    finalResponse.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
 
-    return addSecurityHeaders(response);
+    // Add CDN optimization headers
+    const cdnUrl = CDNService.getCDNUrl('/api/dashboard/shared', { 
+      type: 'api',
+      optimization: true
+    });
+    if (cdnUrl) {
+      finalResponse.headers.set('X-CDN-URL', cdnUrl);
+    }
+
+    // Queue analytics job (async)
+    const jobQueue = JobQueue.getInstance();
+    jobQueue.addJob('analytics-processing', {
+      type: 'dashboard_shared_view',
+      userId,
+      ip,
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString(),
+      sharedLinksCount: Array.isArray(sharedLinks) ? sharedLinks.length : 0
+    }).catch(error => {
+      console.warn('Failed to queue analytics job:', error);
+    });
+
+    return addSecurityHeaders(finalResponse);
 
   } catch (error) {
     console.error('Dashboard shared links error:', error);
@@ -107,10 +180,14 @@ export async function GET(request: NextRequest) {
 // POST /api/dashboard/shared - Create a new shared link
 export async function POST(request: NextRequest) {
   try {
+    // Extract IP address properly for NextRequest
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     // Apply rate limiting
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'create_shared_link',
-      request.ip || 'unknown',
+      ip,
       10, // 10 requests
       3600 // per hour
     );
@@ -182,14 +259,16 @@ export async function POST(request: NextRequest) {
     const { fileId, expiresAt } = validation.data;
 
     // Sanitize file ID
-    const sanitizedFileId = sanitizeInput(fileId);
-
-    // Create shared link using database service
+    const sanitizedFileId = sanitizeInput(fileId);    // Create shared link using database service
     const sharedLink = await SharedLinkService.createSharedLink({
       fileId: sanitizedFileId,
       userId,
       expiresAt: expiresAt ? new Date(expiresAt) : undefined,
     });
+    
+    // Invalidate cache since we're adding a new shared link
+    const cacheKey = `dashboard_shared:${userId}`;
+    await CacheService.delete(cacheKey);
     
     const response = NextResponse.json({
       success: true,
@@ -200,6 +279,19 @@ export async function POST(request: NextRequest) {
     response.headers.set('X-RateLimit-Limit', '10');
     response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
     response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+
+    // Queue analytics job (async)
+    const jobQueue = JobQueue.getInstance();
+    jobQueue.addJob('analytics-processing', {
+      type: 'shared_link_created',
+      userId,
+      fileId: sanitizedFileId,
+      ip,
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString()
+    }).catch(error => {
+      console.warn('Failed to queue analytics job:', error);
+    });
 
     return addSecurityHeaders(response);
 
@@ -222,10 +314,14 @@ export async function POST(request: NextRequest) {
 // DELETE /api/dashboard/shared - Delete a shared link
 export async function DELETE(request: NextRequest) {
   try {
+    // Extract IP address properly for NextRequest
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     // Apply rate limiting
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'delete_shared_link',
-      request.ip || 'unknown',
+      ip,
       20, // 20 requests
       900 // per 15 minutes
     );
@@ -303,9 +399,7 @@ export async function DELETE(request: NextRequest) {
         { error: 'Shared link not found or access denied' },
         { status: 404 }
       ));
-    }
-
-    // Delete shared link using database service
+    }    // Delete shared link using database service
     try {
       await SharedLinkService.deleteSharedLink(sanitizedFileId);
     } catch (error) {
@@ -314,6 +408,10 @@ export async function DELETE(request: NextRequest) {
         { status: 404 }
       ));
     }
+
+    // Invalidate cache since we're removing a shared link
+    const cacheKey = `dashboard_shared:${userId}`;
+    await CacheService.delete(cacheKey);
 
     const response = NextResponse.json({
       success: true,
@@ -324,6 +422,19 @@ export async function DELETE(request: NextRequest) {
     response.headers.set('X-RateLimit-Limit', '20');
     response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
     response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+
+    // Queue analytics job (async)
+    const jobQueue = JobQueue.getInstance();
+    jobQueue.addJob('analytics-processing', {
+      type: 'shared_link_deleted',
+      userId,
+      fileId: sanitizedFileId,
+      ip,
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString()
+    }).catch(error => {
+      console.warn('Failed to queue analytics job:', error);
+    });
 
     return addSecurityHeaders(response);
 

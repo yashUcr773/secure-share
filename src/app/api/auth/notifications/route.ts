@@ -4,6 +4,8 @@ import { AuthService } from '@/lib/auth-enhanced';
 import { UserService } from '@/lib/database';
 import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFWithSession } from '@/lib/security';
+import { CacheService } from '@/lib/cache';
+import { jobQueue } from '@/lib/job-queue';
 
 // Validation schema for notification settings
 const notificationSettingsSchema = z.object({
@@ -109,10 +111,23 @@ export async function PUT(request: NextRequest) {
       const updateResult = await UserService.updateUser(verification.user.id, {
         name: preferencesData
       });
-      
-      if (!updateResult) {
+        if (!updateResult) {
         throw new Error('Failed to save preferences');
       }
+      
+      // Invalidate user-related caches
+      await CacheService.delete(`user:${verification.user.id}`);
+      await CacheService.delete(`user_notifications:${verification.user.id}`);
+      
+      // Queue analytics job for notification settings change
+      await jobQueue.addJob('analytics-processing', {
+        type: 'notification_settings_updated',
+        userId: verification.user.id,
+        settings: validation.data,
+        ip: createRateLimitIdentifier(request, 'notifications-update').split(':')[0],
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date().toISOString()
+      });
       
     } catch (storageError) {
       console.error('Failed to save notification settings:', storageError);
@@ -187,11 +202,31 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       );
       return addSecurityHeaders(response);
-    }
-
-    // Get notification settings from user preferences
+    }    // Get notification settings from user preferences
     try {
       const currentUser = verification.user;
+      
+      // Try to get settings from cache
+      const cacheKey = `user_notifications:${currentUser.id}`;
+      const cacheResult = await CacheService.get(cacheKey);
+      
+      if (cacheResult.hit && cacheResult.data) {
+        // Queue analytics job for cached view
+        await jobQueue.addJob('analytics-processing', {
+          type: 'notification_settings_view',
+          userId: currentUser.id,
+          ip: createRateLimitIdentifier(request, 'notifications-get').split(':')[0],
+          userAgent: request.headers.get('user-agent') || 'unknown',
+          timestamp: new Date().toISOString(),
+          cached: true
+        });
+        
+        const response = NextResponse.json(
+          { settings: cacheResult.data, cached: true },
+          { status: 200 }
+        );
+        return addSecurityHeaders(response);
+      }
       
       // Extract preferences from name field (temporary solution)
       // In a real application, you'd want a separate preferences table
@@ -209,6 +244,19 @@ export async function GET(request: NextRequest) {
         shareNotifications: true,
         securityAlerts: true,
       };
+      
+      // Cache the settings for 10 minutes
+      await CacheService.set(cacheKey, settings, 600);
+      
+      // Queue analytics job
+      await jobQueue.addJob('analytics-processing', {
+        type: 'notification_settings_view',
+        userId: currentUser.id,
+        ip: createRateLimitIdentifier(request, 'notifications-get').split(':')[0],
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date().toISOString(),
+        cached: false
+      });
 
       const response = NextResponse.json(
         { settings },

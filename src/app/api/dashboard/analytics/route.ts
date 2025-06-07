@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FileService, SharedLinkService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+import { CacheService } from '@/lib/cache';
+import { CompressionService } from '@/lib/compression';
+import { CDNService } from '@/lib/cdn';
+import { jobQueue } from '@/lib/job-queue';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -12,10 +16,14 @@ export async function OPTIONS(request: NextRequest) {
 // GET /api/dashboard/analytics - Get analytics data for the current user
 export async function GET(request: NextRequest) {
   try {
+    // Extract IP address from headers
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     // Apply rate limiting
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'analytics',
-      request.ip || 'unknown',
+      ip,
       10, // 10 requests
       900 // per 15 minutes
     );
@@ -69,10 +77,47 @@ export async function GET(request: NextRequest) {
         { error: 'Invalid token' },
         { status: 401 }
       ));
-    }
-
-    const { searchParams } = new URL(request.url);
+    }    const { searchParams } = new URL(request.url);
     const timeRange = sanitizeInput(searchParams.get('timeRange') || '30d');
+    
+    // Try to get analytics data from cache
+    const cacheKey = `analytics:${userId}:${timeRange}`;
+    const cachedData = await CacheService.get(cacheKey);
+    
+    if (cachedData) {
+      // Queue analytics job for cached view
+      await jobQueue.addJob('analytics-processing', {
+        type: 'analytics_view',
+        userId,
+        timeRange,
+        ip,
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date().toISOString(),
+        cached: true
+      });
+
+      const response = NextResponse.json({
+        success: true,
+        analytics: cachedData,
+        cached: true,
+      });
+      
+      // Add rate limit headers
+      response.headers.set('X-RateLimit-Limit', '10');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+      
+      // Add CDN headers
+      const cdnUrl = CDNService.getCDNUrl('/api/dashboard/analytics', {
+        type: 'api',
+        optimization: true
+      });
+      if (cdnUrl !== '/api/dashboard/analytics') {
+        response.headers.set('X-CDN-URL', cdnUrl);
+      }
+      
+      return addSecurityHeaders(response);
+    }
     
     // Get user's shared links and files for analytics
     const [sharedLinks, userFiles] = await Promise.all([
@@ -121,8 +166,7 @@ export async function GET(request: NextRequest) {
         downloads: Math.floor(Math.random() * totalDownloads / days * 2),
       };
     });
-    
-    const analyticsData = {
+      const analyticsData = {
       totalViews,
       totalDownloads,
       totalShares,
@@ -132,15 +176,61 @@ export async function GET(request: NextRequest) {
       viewsOverTime,
     };
 
-    const response = NextResponse.json({
-      success: true,
-      analytics: analyticsData,
+    // Cache the analytics data for 5 minutes
+    await CacheService.set(cacheKey, analyticsData, 300);
+    
+    // Queue analytics job
+    await jobQueue.addJob('analytics-processing', {
+      type: 'analytics_view',
+      userId,
+      timeRange,
+      ip,
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString(),
+      cached: false
     });
 
-    // Add rate limit headers
+    const responseData = {
+      success: true,
+      analytics: analyticsData,
+    };
+
+    const responseText = JSON.stringify(responseData);
+    let response: NextResponse;
+
+    // Apply compression for larger responses
+    if (responseText.length > 1024) {
+      const compressionResult = await CompressionService.compress(responseText, {
+        mimeType: 'application/json'
+      });
+      
+      if (compressionResult.success && compressionResult.data) {
+        response = new NextResponse(compressionResult.data, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Encoding': compressionResult.encoding || 'gzip',
+            'Content-Length': compressionResult.compressedSize?.toString() || '',
+          },
+        });
+      } else {
+        response = NextResponse.json(responseData);
+      }
+    } else {
+      response = NextResponse.json(responseData);
+    }    // Add rate limit headers
     response.headers.set('X-RateLimit-Limit', '10');
     response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
     response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+    
+    // Add CDN headers
+    const cdnUrl = CDNService.getCDNUrl('/api/dashboard/analytics', {
+      type: 'api',
+      optimization: true
+    });
+    if (cdnUrl !== '/api/dashboard/analytics') {
+      response.headers.set('X-CDN-URL', cdnUrl);
+    }
 
     return addSecurityHeaders(response);
 

@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { FileService, UserService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFWithSession } from '@/lib/security';
+import { CacheService } from '@/lib/cache';
+import { CDNService } from '@/lib/cdn';
+import { JobQueueHelpers, jobQueue } from '@/lib/job-queue';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -117,12 +120,56 @@ export async function POST(request: NextRequest) {
       fileName: sanitizedFileName,
       fileSize,
       encryptedContent,
-      salt,
+      salt: salt || '',
       iv,
       key: isPasswordProtected ? undefined : (key || undefined), // Don't store key if password protected
       isPasswordProtected,
       userId: userId || undefined, // undefined for anonymous uploads
     });
+
+    // Cache file metadata for quick access
+    try {
+      await CacheService.cacheFileMetadata(file.id, {
+        fileName: sanitizedFileName,
+        fileSize,
+        createdAt: file.createdAt,
+        isPasswordProtected,
+        userId: userId || null,
+      });
+    } catch (cacheError) {
+      console.warn('Failed to cache file metadata:', cacheError);
+    }
+
+    // Schedule background compression job for large files
+    if (fileSize > 1024 * 1024) { // Files larger than 1MB
+      try {
+        await JobQueueHelpers.addFileCompressionJob(file.id, sanitizedFileName, 'normal');
+      } catch (jobError) {
+        console.warn('Failed to schedule compression job:', jobError);
+      }
+    }
+
+    // Schedule virus scan for uploaded files
+    try {
+      await jobQueue.addJob('virus-scan', {
+        fileId: file.id,
+        fileName: sanitizedFileName,
+        fileSize,
+      }, { priority: 'high' });
+    } catch (jobError) {
+      console.warn('Failed to schedule virus scan:', jobError);
+    }
+
+    // Generate CDN URL if available
+    let shareUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/share/${file.id}`;
+    try {
+      const cdnUrl = CDNService.getCDNUrl(`/share/${file.id}`);
+      if (cdnUrl !== `/share/${file.id}`) {
+        shareUrl = cdnUrl;
+      }
+    } catch (cdnError) {
+      console.warn('Failed to generate CDN URL:', cdnError);
+    }
 
     // Update the file with the custom shareId if provided
     if (shareId !== file.id) {
@@ -133,7 +180,10 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json({
       success: true,
       shareId: file.id,
-      shareUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/share/${file.id}`,
+      shareUrl,
+      cached: true, // Indicate that metadata is cached
+      compressionScheduled: fileSize > 1024 * 1024,
+      scanScheduled: true,
     });
 
     return addSecurityHeaders(response);

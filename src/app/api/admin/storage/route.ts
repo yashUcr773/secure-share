@@ -4,6 +4,10 @@ import { FileStorage } from '@/lib/storage';
 import { EdgeAuthService } from '@/lib/auth-edge';
 import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+import { CacheService } from '@/lib/cache';
+import { CompressionService } from '@/lib/compression';
+import { CDNService } from '@/lib/cdn';
+import { jobQueue } from '@/lib/job-queue';
 
 // Validation schema for maintenance actions
 const maintenanceSchema = z.object({
@@ -95,25 +99,105 @@ export async function GET(request: NextRequest) {
         { error: 'Invalid request origin' },
         { status: 403 }
       ));
-    }
-
-    // Admin authentication
+    }    // Admin authentication
     const auth = await verifyAdminAccess(request);
     if (!auth.success) {
       return auth.response!;
     }
 
+    // Try to get storage stats from cache
+    const cacheKey = `admin_storage_stats:${auth.userId}`;
+    const cachedStats = await CacheService.get(cacheKey);
+    
+    if (cachedStats) {
+      // Queue analytics job for cached view
+      await jobQueue.addJob('analytics-processing', {
+        type: 'admin_storage_view',
+        userId: auth.userId,
+        ip: createRateLimitIdentifier(request, 'admin_storage').split(':')[0],
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date().toISOString(),
+        cached: true
+      });
+
+      const response = NextResponse.json({
+        success: true,
+        stats: cachedStats,
+        cached: true,
+      });
+
+      // Add rate limit headers
+      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
+      // Add CDN headers
+      const cdnUrl = CDNService.getCDNUrl('/api/admin/storage', {
+        type: 'api',
+        optimization: true
+      });
+      if (cdnUrl !== '/api/admin/storage') {
+        response.headers.set('X-CDN-URL', cdnUrl);
+      }
+
+      return addSecurityHeaders(response);
+    }
+
     const stats = await FileStorage.getStats();
     
-    const response = NextResponse.json({
+    // Cache the stats for 2 minutes
+    await CacheService.set(cacheKey, stats, 120);
+    
+    // Queue analytics job
+    await jobQueue.addJob('analytics-processing', {
+      type: 'admin_storage_view',
+      userId: auth.userId,
+      ip: createRateLimitIdentifier(request, 'admin_storage').split(':')[0],
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString(),
+      cached: false
+    });
+
+    const responseData = {
       success: true,
       stats,
-    });
+    };
+
+    const responseText = JSON.stringify(responseData);
+    let response: NextResponse;    // Apply compression for larger responses
+    if (responseText.length > 1024) {
+      const compressionResult = await CompressionService.compress(responseText, {
+        mimeType: 'application/json'
+      });
+      
+      if (compressionResult.compressed && compressionResult.data) {
+        response = new NextResponse(compressionResult.data, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Encoding': compressionResult.algorithm === 'gzip' ? 'gzip' : 'identity',
+            'Content-Length': compressionResult.compressedSize.toString(),
+          },
+        });
+      } else {
+        response = NextResponse.json(responseData);
+      }
+    } else {
+      response = NextResponse.json(responseData);    }
 
     // Add rate limit headers
     Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
+    
+    // Add CDN headers
+    const cdnUrl = CDNService.getCDNUrl('/api/admin/storage', {
+      type: 'api',
+      optimization: true
+    });
+    if (cdnUrl !== '/api/admin/storage') {
+      response.headers.set('X-CDN-URL', cdnUrl);
+    }
 
     return addSecurityHeaders(response);
 
@@ -176,10 +260,20 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const { action, daysOld } = validation.data;
-
-    if (action === 'cleanup') {
+    const { action, daysOld } = validation.data;    if (action === 'cleanup') {
       const deletedCount = await FileStorage.cleanupOldFiles(daysOld || 30);
+      
+      // Queue analytics job for maintenance action
+      await jobQueue.addJob('analytics-processing', {
+        type: 'admin_storage_maintenance',
+        userId: auth.userId,
+        action: 'cleanup',
+        deletedCount,
+        daysOld: daysOld || 30,
+        ip: createRateLimitIdentifier(request, 'admin_maintenance').split(':')[0],
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date().toISOString()
+      });
       
       const response = NextResponse.json({
         success: true,

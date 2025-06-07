@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { FolderService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+import { CacheService } from '@/lib/cache';
+import { CompressionService } from '@/lib/compression';
+import { CDNService } from '@/lib/cdn';
+import { jobQueue } from '@/lib/job-queue';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -19,10 +23,14 @@ const createFolderSchema = z.object({
 // GET - Get user's folders
 export async function GET(request: NextRequest) {
   try {
+    // Extract IP address from headers
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     // Apply rate limiting
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'folders',
-      request.ip || 'unknown',
+      ip,
       30, // 30 requests
       900 // per 15 minutes
     );
@@ -65,20 +73,104 @@ export async function GET(request: NextRequest) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid token' },
         { status: 401 }
-      ));
+      ));    }
+    
+    // Try to get folders from cache
+    const cacheKey = `folders:${userId}`;
+    const cacheResult = await CacheService.get(cacheKey);
+    
+    if (cacheResult.hit && cacheResult.data) {
+      const cachedFolders = cacheResult.data as any[];
+      
+      // Queue analytics job for cached view
+      await jobQueue.addJob('analytics-processing', {
+        type: 'folders_view',
+        userId,
+        ip,
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date().toISOString(),
+        cached: true
+      });
+
+      const response = NextResponse.json({
+        folders: cachedFolders,
+        total: cachedFolders.length,
+        cached: true,
+      });
+
+      // Add rate limit headers
+      response.headers.set('X-RateLimit-Limit', '30');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+      
+      // Add CDN headers
+      const cdnUrl = CDNService.getCDNUrl('/api/folders', {
+        type: 'api',
+        optimization: true
+      });
+      if (cdnUrl !== '/api/folders') {
+        response.headers.set('X-CDN-URL', cdnUrl);
+      }
+
+      return addSecurityHeaders(response);
     }
     
     const folders = await FolderService.getUserFolders(userId);
     
-    const response = NextResponse.json({
-      folders,
-      total: folders.length,
+    // Cache the folders for 3 minutes
+    await CacheService.set(cacheKey, folders, 180);
+    
+    // Queue analytics job
+    await jobQueue.addJob('analytics-processing', {
+      type: 'folders_view',
+      userId,
+      ip,
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString(),
+      cached: false
     });
 
-    // Add rate limit headers
+    const responseData = {
+      folders,
+      total: folders.length,
+    };
+
+    const responseText = JSON.stringify(responseData);
+    let response: NextResponse;
+
+    // Apply compression for larger responses
+    if (responseText.length > 1024) {
+      const compressionResult = await CompressionService.compress(responseText, {
+        mimeType: 'application/json'
+      });
+      
+      if (compressionResult.compressed && compressionResult.data) {
+        response = new NextResponse(compressionResult.data, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Encoding': compressionResult.algorithm === 'gzip' ? 'gzip' : 'identity',
+            'Content-Length': compressionResult.compressedSize.toString(),
+          },
+        });
+      } else {
+        response = NextResponse.json(responseData);
+      }
+    } else {
+      response = NextResponse.json(responseData);
+    }    // Add rate limit headers
     response.headers.set('X-RateLimit-Limit', '30');
     response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
     response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+    
+    // Add CDN headers
+    const cdnUrl = CDNService.getCDNUrl('/api/folders', {
+      type: 'api',
+      optimization: true
+    });
+    if (cdnUrl !== '/api/folders') {
+      response.headers.set('X-CDN-URL', cdnUrl);
+    }
 
     return addSecurityHeaders(response);
   } catch (error) {
@@ -94,10 +186,14 @@ export async function GET(request: NextRequest) {
 // POST - Create new folder
 export async function POST(request: NextRequest) {
   try {
+    // Extract IP address from headers
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     // Apply rate limiting
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'folder_create',
-      request.ip || 'unknown',
+      ip,
       10, // 10 requests
       3600 // per hour
     );
@@ -163,12 +259,26 @@ export async function POST(request: NextRequest) {
         { error: 'Folder name is required' },
         { status: 400 }
       ));
-    }
-
-    const folder = await FolderService.createFolder({
+    }    const folder = await FolderService.createFolder({
       name: name.trim(),
       parentId: parentId || null,
       userId,
+    });
+    
+    // Invalidate folders cache
+    const cacheKey = `folders:${userId}`;
+    await CacheService.delete(cacheKey);
+    
+    // Queue analytics job for folder creation
+    await jobQueue.addJob('analytics-processing', {
+      type: 'folder_created',
+      userId,
+      folderId: folder.id,
+      folderName: name.trim(),
+      parentId: parentId || null,
+      ip,
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString()
     });
 
     const response = NextResponse.json({

@@ -27,21 +27,21 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const { csrfFetch } = useCSRF();
-  // Check for existing auth session on mount
+  const { csrfFetch } = useCSRF();  // Check for existing auth session on mount
   useEffect(() => {
     checkAuthStatus();
-    
-    // Start automatic token refresh if user is authenticated
-    const timer = setTimeout(() => {
-      if (user) {
-        startTokenRefreshTimer();
-      }
-    }, 1000);
-    
-    return () => clearTimeout(timer);
-  }, [user]);
+  }, []);
 
+  // Start token refresh timer when user becomes authenticated
+  useEffect(() => {
+    if (user) {
+      const timer = setTimeout(() => {
+        startTokenRefreshTimer();
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [user]);
   const checkAuthStatus = async () => {
     try {
       // Try to get user info from a protected endpoint using authenticated fetch
@@ -49,9 +49,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData.user);
+      } else {
+        setUser(null);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
+      setUser(null);
     } finally {
       setLoading(false);
     }

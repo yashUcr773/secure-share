@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { FileService, SharedLinkService, RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+import { CacheService } from '@/lib/cache';
+import { CompressionService } from '@/lib/compression';
+import { CDNService } from '@/lib/cdn';
+import { JobQueue } from '@/lib/job-queue';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -14,15 +18,29 @@ const fileAccessSchema = z.object({
   password: z.string().optional(),
 });
 
+// Extended response type for file downloads
+interface FileDownloadResponse {
+  encryptedContent: string;
+  salt: string;
+  iv: string;
+  key: string | null;
+  isCompressed?: boolean;
+  compressionRatio?: number;
+  cdnUrl?: string;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Apply rate limiting
+    // Apply rate limiting - get IP from headers as NextRequest doesn't have .ip
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'file_access',
-      request.ip || 'unknown',
+      ip,
       30, // 30 requests
       900 // per 15 minutes
     );
@@ -47,10 +65,34 @@ export async function GET(
         { error: 'File ID is required' },
         { status: 400 }
       ));
-    }
-
-    // Sanitize file ID to prevent injection attacks
+    }    // Sanitize file ID to prevent injection attacks
     const sanitizedFileId = sanitizeInput(fileId);
+
+    // Try to get cached file metadata first
+    const cacheKey = `file:metadata:${sanitizedFileId}`;
+    const cachedData = await CacheService.get(cacheKey);
+    
+    if (cachedData.hit && cachedData.data) {
+      console.log('Cache hit for file metadata:', sanitizedFileId);
+      
+      // Update view count for analytics (async, don't wait)
+      SharedLinkService.updateAnalytics(sanitizedFileId, 'view').catch(error => {
+        console.warn('Failed to update analytics:', error);
+      });
+
+      const response = NextResponse.json(cachedData.data);
+      
+      // Add cache headers
+      response.headers.set('X-Cache', 'HIT');
+      response.headers.set('Cache-Control', 'public, max-age=1800'); // 30 minutes
+      
+      // Add rate limit headers
+      response.headers.set('X-RateLimit-Limit', '30');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+      
+      return addSecurityHeaders(response);
+    }
 
     const fileData = await FileService.getFileMetadata(sanitizedFileId);
     
@@ -59,9 +101,7 @@ export async function GET(
         { error: 'File not found' },
         { status: 404 }
       ));
-    }
-
-    // Update view count for shared link analytics
+    }    // Update view count for shared link analytics
     try {
       await SharedLinkService.updateAnalytics(sanitizedFileId, 'view');
     } catch (error) {
@@ -69,8 +109,8 @@ export async function GET(
       console.warn('Failed to update analytics:', error);
     }
 
-    // Return file metadata (without the actual encrypted content for security)
-    const response = NextResponse.json({
+    // Prepare response data
+    const responseData = {
       id: fileData.id,
       fileName: fileData.fileName,
       fileSize: fileData.fileSize,
@@ -80,7 +120,16 @@ export async function GET(
       salt: fileData.salt,
       iv: fileData.iv,
       key: fileData.key, // Only present if not password protected
-    });
+    };
+
+    // Cache the metadata for future requests
+    await CacheService.set(cacheKey, responseData, 1800); // Cache for 30 minutes
+
+    // Return file metadata (without the actual encrypted content for security)
+    const response = NextResponse.json(responseData);
+
+    // Add cache headers
+    response.headers.set('X-Cache', 'MISS');
 
     // Add rate limit headers
     response.headers.set('X-RateLimit-Limit', '30');
@@ -103,12 +152,14 @@ export async function GET(
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    // Apply rate limiting for content access
+) {  try {
+    // Apply rate limiting for content access - get IP from headers
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown';
+    
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'file_download',
-      request.ip || 'unknown',
+      ip,
       10, // 10 requests
       900 // per 15 minutes
     );
@@ -145,10 +196,32 @@ export async function POST(
         { error: 'File ID is required' },
         { status: 400 }
       ));
-    }
+    }    // Sanitize file ID
+    const sanitizedFileId = sanitizeInput(fileId);    // Try to get cached file content first
+    const contentCacheKey = `file:content:${sanitizedFileId}`;
+    const cachedContent = await CacheService.get(contentCacheKey);
+    
+    if (cachedContent.hit && cachedContent.data) {
+      console.log('Cache hit for file content:', sanitizedFileId);
+      
+      // Update download count for analytics (async, don't wait)
+      SharedLinkService.updateAnalytics(sanitizedFileId, 'download').catch(error => {
+        console.warn('Failed to update download analytics:', error);
+      });
 
-    // Sanitize file ID
-    const sanitizedFileId = sanitizeInput(fileId);
+      const response = NextResponse.json(cachedContent.data);
+      
+      // Add cache headers
+      response.headers.set('X-Cache', 'HIT');
+      response.headers.set('Cache-Control', 'private, max-age=900'); // 15 minutes for content
+      
+      // Add rate limit headers
+      response.headers.set('X-RateLimit-Limit', '10');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+      
+      return addSecurityHeaders(response);
+    }
 
     const body = await request.json();
     
@@ -178,9 +251,7 @@ export async function POST(
         { error: 'Password required' },
         { status: 401 }
       ));
-    }
-
-    // Update download count for shared link analytics when content is accessed
+    }    // Update download count for shared link analytics when content is accessed
     try {
       await SharedLinkService.updateAnalytics(sanitizedFileId, 'download');
     } catch (error) {
@@ -188,13 +259,85 @@ export async function POST(
       console.warn('Failed to update download analytics:', error);
     }
 
-    // Return the encrypted content for client-side decryption
-    const response = NextResponse.json({
+    // Check if request accepts compression
+    const acceptEncoding = request.headers.get('accept-encoding') || '';
+    const supportsGzip = acceptEncoding.includes('gzip');
+      // Prepare response data with extended type
+    let responseData: FileDownloadResponse = {
       encryptedContent: fileData.encryptedContent,
       salt: fileData.salt,
       iv: fileData.iv,
       key: fileData.key,
-    });
+    };
+
+    // Apply compression if supported and beneficial
+    if (supportsGzip && fileData.encryptedContent) {
+      try {
+        const compressionResult = await CompressionService.compress(
+          fileData.encryptedContent,
+          { mimeType: 'application/octet-stream' }
+        );
+        
+        if (compressionResult.compressed) {
+          responseData = {
+            ...responseData,
+            encryptedContent: compressionResult.data.toString('base64'), // Convert buffer to string
+            isCompressed: true,
+            compressionRatio: compressionResult.compressionRatio
+          };
+        }
+      } catch (error) {
+        console.warn('Compression failed, serving uncompressed:', error);
+      }
+    }
+
+    // Cache the file content for faster subsequent access
+    await CacheService.set(contentCacheKey, responseData, 900); // Cache for 15 minutes    // Generate CDN URL if available (for static assets/thumbnails)
+    if (fileData.fileName && fileData.fileName.match(/\.(jpg|jpeg|png|gif|pdf|txt)$/i)) {
+      try {
+        const cdnUrl = CDNService.getCDNUrl(`/files/${sanitizedFileId}`, { 
+          type: 'sharedFiles',
+          optimization: true 
+        });
+        if (cdnUrl) {
+          responseData.cdnUrl = cdnUrl;
+        }
+      } catch (error) {
+        console.warn('CDN URL generation failed:', error);
+      }
+    }
+
+    // Schedule background job for analytics processing using getInstance
+    try {
+      const jobQueue = JobQueue.getInstance();
+      await jobQueue.addJob('analytics-processing', {
+        type: 'file_download',
+        fileId: sanitizedFileId,
+        fileName: fileData.fileName,
+        fileSize: fileData.fileSize,
+        timestamp: new Date().toISOString(),
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        compressed: !!responseData.isCompressed
+      });
+    } catch (error) {
+      console.warn('Failed to queue analytics job:', error);
+    }
+
+    // Return the encrypted content for client-side decryption
+    const response = NextResponse.json(responseData);
+
+    // Add optimization headers
+    response.headers.set('X-Cache', 'MISS');
+    response.headers.set('Cache-Control', 'private, max-age=900'); // 15 minutes
+    
+    if (responseData.isCompressed) {
+      response.headers.set('Content-Encoding', 'gzip');
+      response.headers.set('X-Compression-Ratio', responseData.compressionRatio?.toString() || '1');
+    }
+    
+    if (responseData.cdnUrl) {
+      response.headers.set('X-CDN-URL', responseData.cdnUrl);
+    }
 
     // Add rate limit headers
     response.headers.set('X-RateLimit-Limit', '10');

@@ -4,6 +4,10 @@ import { FolderService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 import { getClientIP } from '@/lib/rate-limit';
+import { CacheService } from '@/lib/cache';
+import { CompressionService } from '@/lib/compression';
+import { CDNService } from '@/lib/cdn';
+import { jobQueue } from '@/lib/job-queue';
 
 // Validation schema for folder updates
 const updateFolderSchema = z.object({
@@ -96,11 +100,48 @@ export async function GET(
 
     const { id: folderId } = await params;
     const sanitizedFolderId = sanitizeInput(folderId);
-    
-    // Verify access
+      // Verify access
     const auth = await verifyFolderAccess(request, sanitizedFolderId);
     if (!auth.success) {
       return auth.response!;
+    }
+
+    // Try to get folder from cache
+    const cacheKey = `folder:${sanitizedFolderId}:${auth.userId}`;
+    const cacheResult = await CacheService.get(cacheKey);
+    
+    if (cacheResult.hit && cacheResult.data) {
+      // Queue analytics job for cached view
+      await jobQueue.addJob('analytics-processing', {
+        type: 'folder_view',
+        userId: auth.userId,
+        folderId: sanitizedFolderId,
+        ip: getClientIP(request),
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date().toISOString(),
+        cached: true
+      });
+
+      const response = NextResponse.json({ 
+        folder: cacheResult.data,
+        cached: true 
+      });
+
+      // Add rate limit headers
+      response.headers.set('X-RateLimit-Limit', '100');
+      response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+      
+      // Add CDN headers
+      const cdnUrl = CDNService.getCDNUrl(`/api/folders/${sanitizedFolderId}`, {
+        type: 'api',
+        optimization: true
+      });
+      if (cdnUrl !== `/api/folders/${sanitizedFolderId}`) {
+        response.headers.set('X-CDN-URL', cdnUrl);
+      }
+
+      return addSecurityHeaders(response);
     }
 
     const folder = await FolderService.getFolder(sanitizedFolderId);
@@ -111,13 +152,58 @@ export async function GET(
         { status: 404 }
       ));
     }
+    
+    // Cache the folder for 5 minutes
+    await CacheService.set(cacheKey, folder, 300);
+    
+    // Queue analytics job
+    await jobQueue.addJob('analytics-processing', {
+      type: 'folder_view',
+      userId: auth.userId,
+      folderId: sanitizedFolderId,
+      ip: getClientIP(request),
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      timestamp: new Date().toISOString(),
+      cached: false
+    });
 
-    const response = NextResponse.json({ folder });
+    const responseData = { folder };
+    const responseText = JSON.stringify(responseData);
+    let response: NextResponse;
 
-    // Add rate limit headers
+    // Apply compression for larger responses
+    if (responseText.length > 1024) {
+      const compressionResult = await CompressionService.compress(responseText, {
+        mimeType: 'application/json'
+      });
+      
+      if (compressionResult.compressed && compressionResult.data) {
+        response = new NextResponse(compressionResult.data, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Encoding': compressionResult.algorithm === 'gzip' ? 'gzip' : 'identity',
+            'Content-Length': compressionResult.compressedSize.toString(),
+          },
+        });
+      } else {
+        response = NextResponse.json(responseData);
+      }
+    } else {
+      response = NextResponse.json(responseData);
+    }    // Add rate limit headers
     response.headers.set('X-RateLimit-Limit', '100');
     response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
     response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
+    
+    // Add CDN headers
+    const cdnUrl = CDNService.getCDNUrl(`/api/folders/${sanitizedFolderId}`, {
+      type: 'api',
+      optimization: true
+    });
+    if (cdnUrl !== `/api/folders/${sanitizedFolderId}`) {
+      response.headers.set('X-CDN-URL', cdnUrl);
+    }
 
     return addSecurityHeaders(response);
   } catch (error) {

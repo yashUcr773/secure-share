@@ -4,6 +4,8 @@ import { AuthService } from '@/lib/auth-enhanced';
 import { RateLimitService, UserService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFWithSession } from '@/lib/security';
 import { getClientIP } from '@/lib/rate-limit';
+import { CacheService } from '@/lib/cache';
+import { jobQueue } from '@/lib/job-queue';
 
 // Validation schema for profile update
 const profileUpdateSchema = z.object({
@@ -99,14 +101,30 @@ export async function PUT(request: NextRequest) {
     try {
       const updateResult = await AuthService.updateProfile(currentUser.id, {
         email: sanitizedEmail,
-      });
-
-      if (!updateResult.success) {
+      });      if (!updateResult.success) {
         return addSecurityHeaders(NextResponse.json(
           { error: updateResult.error || 'Failed to update profile' },
           { status: 500 }
         ));
       }
+      
+      // Invalidate user-related caches
+      await CacheService.delete(`user:${currentUser.id}`);
+      await CacheService.delete(`folders:${currentUser.id}`);
+      await CacheService.delete(`dashboard_files:${currentUser.id}`);
+      await CacheService.delete(`dashboard_shared:${currentUser.id}`);
+      
+      // Queue analytics job for profile update
+      await jobQueue.addJob('analytics-processing', {
+        type: 'profile_updated',
+        userId: currentUser.id,
+        emailChanged: sanitizedEmail !== currentUser.email.toLowerCase(),
+        oldEmail: currentUser.email,
+        newEmail: sanitizedEmail,
+        ip: getClientIP(request),
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date().toISOString()
+      });
 
       const response = NextResponse.json({
         message: 'Profile updated successfully',
