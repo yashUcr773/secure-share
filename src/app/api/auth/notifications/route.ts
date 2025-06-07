@@ -91,10 +91,42 @@ export async function PUT(request: NextRequest) {
         { status: 400 }
       );
       return addSecurityHeaders(response);
-    }
+    }    // Save notification settings to user preferences
+    try {
+      // Get current user
+      const currentUser = await AuthService.getUserById(payload.userId);
+      if (!currentUser) {
+        const response = NextResponse.json(
+          { error: 'User not found' },
+          { status: 404 }
+        );
+        return addSecurityHeaders(response);
+      }
 
-    // TODO: Save notification settings to user preferences
-    // For now, just return success
+      // Update user with preferences
+      const userUpdate = {
+        ...currentUser,
+        preferences: {
+          ...(currentUser as any).preferences,
+          notifications: validation.data
+        },
+        updatedAt: new Date().toISOString()
+      };
+
+      // Save updated user data
+      const updateResult = await AuthService.updateUser(payload.userId, userUpdate);
+      if (!updateResult.success) {
+        throw new Error(updateResult.error || 'Failed to save preferences');
+      }
+      
+    } catch (storageError) {
+      console.error('Failed to save notification settings:', storageError);
+      const response = NextResponse.json(
+        { error: 'Failed to save settings' },
+        { status: 500 }
+      );
+      return addSecurityHeaders(response);
+    }
     const response = NextResponse.json(
       { 
         message: 'Notification settings updated successfully',
@@ -162,21 +194,45 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       );
       return addSecurityHeaders(response);
+    }    // Get notification settings from user preferences
+    try {
+      const currentUser = await AuthService.getUserById(payload.userId);
+      if (!currentUser) {
+        const response = NextResponse.json(
+          { error: 'User not found' },
+          { status: 404 }
+        );
+        return addSecurityHeaders(response);
+      }
+
+      // Get stored preferences or use defaults
+      const userPreferences = (currentUser as any).preferences?.notifications || null;
+      const settings = userPreferences || {
+        emailNotifications: true,
+        shareNotifications: true,
+        securityAlerts: true,
+      };
+
+      const response = NextResponse.json(
+        { settings },
+        { status: 200 }
+      );
+      return addSecurityHeaders(response);
+    } catch (storageError) {
+      console.error('Failed to get notification settings:', storageError);
+      // Fall back to default settings
+      const defaultSettings = {
+        emailNotifications: true,
+        shareNotifications: true,
+        securityAlerts: true,
+      };
+
+      const response = NextResponse.json(
+        { settings: defaultSettings },
+        { status: 200 }
+      );
+      return addSecurityHeaders(response);
     }
-
-    // TODO: Get notification settings from user preferences
-    // For now, return default settings
-    const defaultSettings = {
-      emailNotifications: true,
-      shareNotifications: true,
-      securityAlerts: true,
-    };
-
-    const response = NextResponse.json(
-      { settings: defaultSettings },
-      { status: 200 }
-    );
-    return addSecurityHeaders(response);
 
   } catch (error) {
     console.error('Get notification settings error:', error);

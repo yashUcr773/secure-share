@@ -41,11 +41,16 @@ async function verifyAdminAccess(request: NextRequest): Promise<{ success: boole
           { status: 401 }
         ))
       };
+    }    // Check if user has admin privileges
+    if (!EdgeAuthService.isAdmin(payload)) {
+      return {
+        success: false,
+        response: addSecurityHeaders(NextResponse.json(
+          { error: 'Admin access required' },
+          { status: 403 }
+        ))
+      };
     }
-
-    // In a real application, you would check if the user has admin privileges
-    // For now, we'll allow any authenticated user for demo purposes
-    // TODO: Implement proper admin role checking
     
     return { success: true, userId: payload.userId };
   } catch (error) {

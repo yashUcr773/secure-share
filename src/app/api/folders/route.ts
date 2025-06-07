@@ -92,29 +92,80 @@ export async function GET(request: NextRequest) {
 // POST - Create new folder
 export async function POST(request: NextRequest) {
   try {
+    // Apply rate limiting
+    const identifier = createRateLimitIdentifier(request, 'folder_create');
+    const rateLimitResult = await checkRateLimit(request, generalRateLimit, identifier);
+    
+    if (!rateLimitResult.success) {
+      const response = NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 }
+      );
+      
+      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
+      return addSecurityHeaders(response);
+    }
+
+    // Validate request origin (CSRF protection)
+    const allowedOrigins = [
+      process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    ];
+    
+    if (!validateOrigin(request, allowedOrigins)) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid request origin' },
+        { status: 403 }
+      ));
+    }
+
+    // Get user from authentication token
+    const token = request.cookies.get('auth-token')?.value;
+    
+    if (!token) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      ));
+    }
+
+    const payload = await EdgeAuthService.verifyToken(token);
+    if (!payload) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Invalid token' },
+        { status: 401 }
+      ));
+    }
+
     const body = await request.json();
     const { name, parentId } = body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      return NextResponse.json(
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Folder name is required' },
         { status: 400 }
-      );
+      ));
     }
-
-    // TODO: Get actual user ID from authentication
-    const userId = 'anonymous';
 
     const folder = await FileStorage.createFolder({
       name: name.trim(),
       parentId: parentId || null,
-      userId,
+      userId: payload.userId,
     });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       folder,
       message: 'Folder created successfully',
     });
+
+    // Add rate limit headers
+    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
+    return addSecurityHeaders(response);
   } catch (error) {
     console.error('Folder creation error:', error);
     return NextResponse.json(

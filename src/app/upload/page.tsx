@@ -10,9 +10,13 @@ import { Upload, Lock, Eye, EyeOff, Copy, Check } from "lucide-react";
 import { FileEncryption } from "@/lib/crypto";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useCSRF } from "@/hooks/useCSRF";
+import { useEnhancedToast } from "@/hooks/useEnhancedToast";
+import { validateFileSize, validateFileType, withRetry } from "@/lib/errors";
+import { config } from "@/lib/config";
 
 export default function UploadPage() {
   const { csrfFetch } = useCSRF();
+  const { showError, fileUploadSuccess, fileUploadError, fileCopySuccess } = useEnhancedToast();
   const [file, setFile] = useState<File | null>(null);
   const [textContent, setTextContent] = useState("");
   const [password, setPassword] = useState("");
@@ -48,17 +52,27 @@ export default function UploadPage() {
       reader.readAsText(files[0]);
     }
   }, []);
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      setFile(selectedFile);
-      // Read file content for text files
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setTextContent(e.target?.result as string || "");
-      };
-      reader.readAsText(selectedFile);
+      try {
+        // Validate file size and type
+        validateFileSize(selectedFile, config.maxFileSize);
+        validateFileType(selectedFile, ['.txt', '.md', '.json', '.csv', '.xml', '.log']);
+        
+        setFile(selectedFile);
+        // Read file content for text files
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setTextContent(e.target?.result as string || "");
+        };
+        reader.onerror = () => {
+          showError("Failed to read file content");
+        };
+        reader.readAsText(selectedFile);
+      } catch (error) {
+        showError(error);
+      }
     }
   };
   const handleUpload = async () => {
@@ -91,26 +105,28 @@ export default function UploadPage() {
         }),
       });
       
-      const result = await response.json();
-      
-      if (result.success) {
+      const result = await response.json();      if (result.success) {
         setShareLink(result.shareUrl);
+        fileUploadSuccess(file?.name || 'pasted-text.txt');
       } else {
         console.error('Upload failed:', result.error);
-        // TODO: Show error toast
+        fileUploadError(result.error || "An error occurred while uploading your file.", file?.name);
       }
     } catch (error) {
       console.error('Encryption/upload error:', error);
-      // TODO: Show error toast
+      fileUploadError(error, file?.name);
     } finally {
       setIsUploading(false);
     }
-  };
-
-  const copyToClipboard = async () => {
-    await navigator.clipboard.writeText(shareLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  };  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setCopied(true);
+      fileCopySuccess();
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      showError(error, "Copy failed");
+    }
   };
 
   const resetForm = () => {

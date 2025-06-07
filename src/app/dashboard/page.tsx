@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { useEnhancedToast } from "@/hooks/useEnhancedToast";
 import { Upload, FolderOpen, File, Share2, Trash2, Edit, Plus, Search } from "lucide-react";
 
 interface FileItem {
@@ -24,6 +25,7 @@ interface FolderItem {
 }
 
 export default function DashboardPage() {
+  const { fileCopySuccess, showError } = useEnhancedToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [folders, setFolders] = useState<FolderItem[]>([]);
@@ -56,11 +58,14 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
-  const copyShareLink = async (fileId: string) => {
-    const shareUrl = `${window.location.origin}/share/${fileId}`;
-    await navigator.clipboard.writeText(shareUrl);
-    // TODO: Show toast notification
+  };  const copyShareLink = async (fileId: string) => {
+    try {
+      const shareUrl = `${window.location.origin}/share/${fileId}`;
+      await navigator.clipboard.writeText(shareUrl);
+      fileCopySuccess();
+    } catch (error) {
+      showError(error, "Failed to copy link");
+    }
   };
 
   const formatFileSize = (bytes: number) => {

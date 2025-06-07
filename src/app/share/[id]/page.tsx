@@ -10,16 +10,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Lock, Eye, EyeOff, Download, Copy, Check } from "lucide-react";
 import { FileEncryption } from "@/lib/crypto";
 import { Header } from "@/components/Header";
+import { useEnhancedToast } from "@/hooks/useEnhancedToast";
 
 export default function SharePage() {
   const params = useParams();
+  const { showSuccess, showError, showWarning } = useEnhancedToast();
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [fileContent, setFileContent] = useState("");
   const [fileName, setFileName] = useState("");
   const [isPasswordRequired, setIsPasswordRequired] = useState(false);
-  const [isDecrypted, setIsDecrypted] = useState(false);  const [error, setError] = useState("");
+  const [isDecrypted, setIsDecrypted] = useState(false);
+  const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     const fetchFileMetadata = async () => {
@@ -30,12 +33,13 @@ export default function SharePage() {
         if (response.ok) {
           const metadata = await response.json();
           setFileName(metadata.fileName);
-          setIsPasswordRequired(metadata.isPasswordProtected);
-        } else {
+          setIsPasswordRequired(metadata.isPasswordProtected);        } else {
+          showError("File not found or has expired", "Access Denied");
           setError("File not found or expired");
         }
       } catch (err) {
         console.error("Error fetching file metadata:", err);
+        showError(err, "Failed to Load File");
         setError("Failed to load file");
       } finally {
         setIsLoading(false);
@@ -45,9 +49,9 @@ export default function SharePage() {
     if (params.id) {
       fetchFileMetadata();
     }
-  }, [params.id]);
-  const handleDecrypt = async () => {
+  }, [params.id]);  const handleDecrypt = async () => {
     if (isPasswordRequired && !password.trim()) {
+      showWarning("Password Required", "Please enter the password to decrypt this file.");
       setError("Password is required");
       return;
     }
@@ -67,9 +71,14 @@ export default function SharePage() {
         }),
       });
 
-      console.log(response)
-      
       if (!response.ok) {
+        if (response.status === 401) {
+          showError("Incorrect password provided", "Authentication Failed");
+        } else if (response.status === 404) {
+          showError("File not found or has expired", "File Not Found");
+        } else {
+          showError("Failed to access file content", "Access Error");
+        }
         throw new Error('Failed to fetch file content');
       }
       
@@ -92,18 +101,20 @@ export default function SharePage() {
           key,
           iv
         );
-      }
-      
+      }      
       setFileContent(decryptedContent);
       setIsDecrypted(true);
+      showSuccess("File Decrypted", "File has been successfully decrypted and is ready to view.");
     } catch (err) {
       console.error('Decryption error:', err);
+      if (!error) { // Only show toast if we haven't already shown one above
+        showError("Failed to decrypt file. Please check your password and try again.", "Decryption Failed");
+      }
       setError("Failed to decrypt file. Please check your password.");
     } finally {
       setIsLoading(false);
     }
   };
-
   const downloadFile = () => {
     const blob = new Blob([fileContent], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
@@ -114,12 +125,19 @@ export default function SharePage() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    showSuccess("Download Started", `${fileName} has been downloaded to your device.`);
   };
 
   const copyContent = async () => {
-    await navigator.clipboard.writeText(fileContent);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(fileContent);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      showSuccess("Content Copied", "File content has been copied to your clipboard.");
+    } catch (err) {
+      console.error('Failed to copy content:', err);
+      showError("Failed to copy content to clipboard", "Copy Failed");
+    }
   };
   if (isLoading && !isDecrypted) {
     return (

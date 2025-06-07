@@ -146,16 +146,20 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const fileId = searchParams.get('id');
-    
-    if (!fileId) {
+      if (!fileId) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'File ID is required' },
         { status: 400 }
       ));
+    }    // Verify user owns this file before deletion
+    const ownsFile = await FileStorage.verifyFileOwnership(fileId, userId);
+    if (!ownsFile) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'File not found or access denied' },
+        { status: 404 }
+      ));
     }
 
-    // TODO: Verify user owns this file before deletion
-    // For now, we'll proceed with the deletion
     const deleted = await FileStorage.deleteFile(fileId);
     
     if (!deleted) {

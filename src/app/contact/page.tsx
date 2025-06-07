@@ -9,9 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mail, MessageSquare, Phone, MapPin, Send, Check } from "lucide-react";
 import { useCSRF } from "@/hooks/useCSRF";
+import { useEnhancedToast } from "@/hooks/useEnhancedToast";
 
 export default function ContactPage() {
   const { csrfFetch } = useCSRF();
+  const { showSuccess, showError, showInfo } = useEnhancedToast();
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -26,11 +28,11 @@ export default function ContactPage() {
       ...formData,
       [e.target.name]: e.target.value
     });
-  };
-  const handleSubmit = async (e: React.FormEvent) => {
+  };  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-      try {
+    
+    try {
       const response = await csrfFetch('/api/contact', {
         method: 'POST',
         body: JSON.stringify(formData),
@@ -40,13 +42,16 @@ export default function ContactPage() {
 
       if (response.ok) {
         setIsSubmitted(true);
+        showSuccess(
+          "Message sent successfully!",
+          "We'll get back to you within 24 hours."
+        );
       } else {
         throw new Error(data.error || 'Failed to send message');
       }
     } catch (error) {
       console.error('Contact form error:', error);
-      // You could add error state handling here
-      alert('Failed to send message. Please try again.');
+      showError(error, "Failed to send message");
     } finally {
       setIsSubmitting(false);
     }

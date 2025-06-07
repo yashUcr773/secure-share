@@ -106,10 +106,29 @@ export async function PUT(request: NextRequest) {
           { status: 400 }
         ));
       }
-    }
+    }    // Update user profile in storage
+    try {
+      const updateResult = await AuthService.updateUser(payload.userId, {
+        email: sanitizedEmail,
+        updatedAt: new Date().toISOString()
+      });
 
-    // TODO: Update user profile in storage
-    // For now, just return success
+      if (!updateResult.success) {
+        const response = NextResponse.json(
+          { error: updateResult.error || 'Failed to update profile' },
+          { status: 500 }
+        );
+        return addSecurityHeaders(response);
+      }
+
+    } catch (updateError) {
+      console.error('Failed to update user profile:', updateError);
+      const response = NextResponse.json(
+        { error: 'Failed to update profile' },
+        { status: 500 }
+      );
+      return addSecurityHeaders(response);
+    }
     const response = NextResponse.json(
       { 
         message: 'Profile updated successfully',

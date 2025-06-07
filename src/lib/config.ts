@@ -21,12 +21,12 @@ export const config = {
     // Authentication Settings
   jwtSecret: process.env.JWT_SECRET,
   sessionSecret: process.env.SESSION_SECRET,
-  
-  // Rate Limiting
+    // Rate Limiting
   rateLimit: {
     uploadPerHour: parseInt(process.env.RATE_LIMIT_UPLOAD_PER_HOUR || '10'),
     downloadPerHour: parseInt(process.env.RATE_LIMIT_DOWNLOAD_PER_HOUR || '100'),
     authPerHour: parseInt(process.env.RATE_LIMIT_AUTH_PER_HOUR || '5'),
+    generalPerMinute: parseInt(process.env.RATE_LIMIT_GENERAL_PER_MINUTE || '60'),
     maxConcurrentUploads: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT_UPLOADS || '3'),
   },
   
@@ -37,13 +37,48 @@ export const config = {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-    // Feature Flags
+  // Feature Flags
   features: {
-    authentication: true, // Enable authentication
-    emailNotifications: false, // Enable when email is implemented
-    fileUpload: true,
-    passwordProtection: true,
-    keyBasedSharing: true,
+    authentication: process.env.FEATURE_AUTHENTICATION !== 'false', // Enable authentication
+    emailNotifications: process.env.FEATURE_EMAIL_NOTIFICATIONS === 'true', // Enable when email is implemented
+    fileUpload: process.env.FEATURE_FILE_UPLOAD !== 'false',
+    passwordProtection: process.env.FEATURE_PASSWORD_PROTECTION !== 'false',
+    keyBasedSharing: process.env.FEATURE_KEY_BASED_SHARING !== 'false',
+    analytics: process.env.FEATURE_ANALYTICS !== 'false',
+    folderOrganization: process.env.FEATURE_FOLDER_ORGANIZATION !== 'false',
+    advancedSharing: process.env.FEATURE_ADVANCED_SHARING === 'true',
+    customExpiration: process.env.FEATURE_CUSTOM_EXPIRATION === 'true',
+    bulkOperations: process.env.FEATURE_BULK_OPERATIONS === 'true',
+    apiAccess: process.env.FEATURE_API_ACCESS === 'true',
+  },
+
+  // UI Configuration
+  ui: {
+    maxFileDisplaySize: parseInt(process.env.UI_MAX_FILE_DISPLAY_SIZE || '1048576'), // 1MB
+    defaultTheme: process.env.UI_DEFAULT_THEME || 'system', // 'light', 'dark', 'system'
+    showFilePreview: process.env.UI_SHOW_FILE_PREVIEW !== 'false',
+    enableDragDrop: process.env.UI_ENABLE_DRAG_DROP !== 'false',
+    toastDuration: parseInt(process.env.UI_TOAST_DURATION || '4000'),
+    animationsEnabled: process.env.UI_ANIMATIONS_ENABLED !== 'false',
+  },
+
+  // Security Configuration
+  security: {
+    csrfTokenExpiry: parseInt(process.env.CSRF_TOKEN_EXPIRY || '1800000'), // 30 minutes
+    sessionTimeout: parseInt(process.env.SESSION_TIMEOUT || '86400000'), // 24 hours
+    maxLoginAttempts: parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5'),
+    lockoutDuration: parseInt(process.env.LOCKOUT_DURATION || '900000'), // 15 minutes
+    passwordMinLength: parseInt(process.env.PASSWORD_MIN_LENGTH || '8'),
+    requireStrongPasswords: process.env.REQUIRE_STRONG_PASSWORDS !== 'false',
+  },
+
+  // File Processing
+  fileProcessing: {
+    allowedExtensions: (process.env.ALLOWED_FILE_EXTENSIONS || '.txt,.md,.json,.csv,.xml,.log,.yaml,.yml,.ini,.conf').split(','),
+    maxFilenameLength: parseInt(process.env.MAX_FILENAME_LENGTH || '255'),
+    virusScanEnabled: process.env.VIRUS_SCAN_ENABLED === 'true',
+    compressionEnabled: process.env.COMPRESSION_ENABLED === 'true',
+    thumbnailGeneration: process.env.THUMBNAIL_GENERATION === 'true',
   },
 };
 
@@ -100,12 +135,8 @@ export function isFileSizeValid(size: number): boolean {
 export function initConfig() {
   try {
     validateConfig();
-    console.log('Configuration loaded successfully');
     
     if (isDevelopment) {
-      console.log('Development mode - file storage enabled');
-      console.log(`Max file size: ${formatFileSize(config.maxFileSize)}`);
-      console.log(`Cleanup after: ${config.cleanupDays} days`);
     }
     
     return true;

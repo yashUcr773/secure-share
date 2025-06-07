@@ -42,6 +42,17 @@ export interface SharedLink {
   userId?: string;
 }
 
+export interface ContactMessage {
+  id: string;
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  timestamp: string;
+  ip: string;
+  status: 'new' | 'read' | 'replied';
+}
+
 export class FileStorage {
   private static readonly STORAGE_DIR = path.resolve(config.storageDir);
   private static readonly FILES_DIR = path.join(this.STORAGE_DIR, 'files');
@@ -178,6 +189,26 @@ export class FileStorage {
   }
 
   /**
+   * Verify user owns a file
+   */
+  static async verifyFileOwnership(fileId: string, userId: string): Promise<boolean> {
+    await this.init();
+
+    try {
+      const file = await this.getFile(fileId);
+      if (!file) {
+        return false;
+      }
+      
+      // Check if user owns the file OR file has no userId (backward compatibility)
+      return file.userId === userId || (!file.userId && userId === 'anonymous');
+    } catch (error) {
+      console.error('Failed to verify file ownership:', error);
+      return false;
+    }
+  }
+
+  /**
    * Delete a file
    */
   static async deleteFile(id: string): Promise<boolean> {
@@ -191,7 +222,6 @@ export class FileStorage {
       // Remove from index
       await this.removeFromIndex(id);
 
-      console.log(`File ${id} deleted successfully`);
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -264,7 +294,6 @@ export class FileStorage {
         }
       }
 
-      console.log(`Cleanup completed: ${deletedCount} files deleted`);
       return deletedCount;
     } catch (error) {
       console.error('Cleanup failed:', error);
@@ -295,7 +324,6 @@ export class FileStorage {
       let newestFile = null;
 
       for (const [x, metadata] of files) {
-        console.log(x)
         const fileMeta = metadata as StoredFile;
         totalSize += fileMeta.fileSize || 0;
         
@@ -358,7 +386,6 @@ export class FileStorage {
       // Save updated index
       await fs.writeFile(foldersIndexPath, JSON.stringify(foldersIndex, null, 2));
 
-      console.log(`Folder ${folder.id} created successfully`);
       return folder;
     } catch (error) {
       console.error('Failed to create folder:', error);
@@ -452,7 +479,6 @@ export class FileStorage {
       if (foldersIndex.folders[folderId]) {
         delete foldersIndex.folders[folderId];
         await fs.writeFile(foldersIndexPath, JSON.stringify(foldersIndex, null, 2));
-        console.log(`Folder ${folderId} deleted successfully`);
         return true;
       }
       
@@ -496,7 +522,6 @@ export class FileStorage {
       
       await fs.writeFile(this.SHARED_LINKS_INDEX_FILE, JSON.stringify(index, null, 2));
       
-      console.log(`Shared link created for file ${fileId}`);
       return sharedLink;
     } catch (error) {
       console.error('Failed to create shared link:', error);
@@ -517,7 +542,6 @@ export class FileStorage {
       const userLinks: SharedLink[] = [];
 
       for (const [fileId, linkData] of Object.entries(index)) {
-        console.log("🚀 ~ FileStorage ~ getUserSharedLinks ~ fileId:", fileId)
         const link = linkData as SharedLink;
         // Include links that belong to the user OR links without a userId (backward compatibility)
         if (link.userId === userId || (!link.userId && userId === 'anonymous')) {
@@ -569,7 +593,6 @@ export class FileStorage {
         }
         
         await fs.writeFile(this.SHARED_LINKS_INDEX_FILE, JSON.stringify(index, null, 2));
-        console.log(`Updated ${type} count for shared link ${fileId}`);
       }
     } catch (error) {
       console.error('Failed to update shared link analytics:', error);
@@ -589,7 +612,6 @@ export class FileStorage {
       if (index[fileId]) {
         delete index[fileId];
         await fs.writeFile(this.SHARED_LINKS_INDEX_FILE, JSON.stringify(index, null, 2));
-        console.log(`Shared link ${fileId} deleted successfully`);
         return true;
       }
       
@@ -615,5 +637,68 @@ export class FileStorage {
     }
 
     return true;
+  }
+}
+
+export class ContactStorage {
+  private static readonly CONTACT_DIR = path.join(path.resolve(config.storageDir), 'contact');
+  private static readonly CONTACT_INDEX = path.join(this.CONTACT_DIR, 'index.json');
+
+  /**
+   * Initialize contact storage
+   */
+  static async init(): Promise<void> {
+    try {
+      await fs.mkdir(this.CONTACT_DIR, { recursive: true });
+      
+      // Create index file if it doesn't exist
+      try {
+        await fs.access(this.CONTACT_INDEX);
+      } catch {
+        await fs.writeFile(this.CONTACT_INDEX, JSON.stringify([]));
+      }
+    } catch (error) {
+      console.error('Failed to initialize contact storage:', error);
+      throw new Error('Contact storage initialization failed');
+    }
+  }
+
+  /**
+   * Save a contact message
+   */
+  static async saveMessage(messageData: Omit<ContactMessage, 'id' | 'timestamp' | 'status'>): Promise<ContactMessage> {
+    await this.init();
+
+    const message: ContactMessage = {
+      ...messageData,
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: new Date().toISOString(),
+      status: 'new',
+    };
+
+    try {
+      // Save individual message file
+      const messagePath = path.join(this.CONTACT_DIR, `${message.id}.json`);
+      await fs.writeFile(messagePath, JSON.stringify(message, null, 2));
+
+      // Update index
+      const indexContent = await fs.readFile(this.CONTACT_INDEX, 'utf-8');
+      const index = JSON.parse(indexContent);
+      
+      index.push({
+        id: message.id,
+        timestamp: message.timestamp,
+        subject: message.subject,
+        status: message.status,
+      });
+      
+      await fs.writeFile(this.CONTACT_INDEX, JSON.stringify(index, null, 2));
+
+      console.log(`Contact message ${message.id} saved successfully`);
+      return message;
+    } catch (error) {
+      console.error('Failed to save contact message:', error);
+      throw new Error('Contact message save failed');
+    }
   }
 }

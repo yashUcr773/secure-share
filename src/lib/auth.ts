@@ -12,6 +12,7 @@ export interface User {
   email: string;
   passwordHash: string;
   name?: string;
+  role: 'user' | 'admin';
   createdAt: string;
   updatedAt: string;
   isActive: boolean;
@@ -21,6 +22,7 @@ export interface User {
 export interface JWTPayload {
   userId: string;
   email: string;
+  role: 'user' | 'admin';
   iat: number;
   exp: number;
 }
@@ -184,11 +186,11 @@ export class AuthService {
   }
   /**
    * Generate a JWT token with proper signing
-   */
-  static async generateToken(user: User): Promise<string> {
+   */  static async generateToken(user: User): Promise<string> {
     const payload: Omit<JWTPayload, 'iat' | 'exp'> = {
       userId: user.id,
       email: user.email,
+      role: user.role,
     };
 
     const secret = config.jwtSecret || 'dev-fallback-secret-key-not-for-production';
@@ -227,6 +229,13 @@ export class AuthService {
   }
 
   /**
+   * Check if a user has admin privileges
+   */
+  static isAdmin(payload: JWTPayload): boolean {
+    return payload.role === 'admin';
+  }
+
+  /**
    * Generate a unique user ID
    */
   static generateUserId(): string {
@@ -258,14 +267,13 @@ export class AuthService {
       }
 
       // Hash password
-      const passwordHash = await this.hashPassword(password);
-
-      // Create user
+      const passwordHash = await this.hashPassword(password);      // Create user
       const user: User = {
         id: this.generateUserId(),
         email: email.toLowerCase().trim(),
         passwordHash,
         name: name?.trim(),
+        role: 'user', // Default role for new users
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         isActive: true,
@@ -457,7 +465,6 @@ export class AuthService {
       // Save updated user
       await this.saveUser(updatedUser);
 
-      console.log(`User ${userId} updated successfully`);
       return { success: true };
 
     } catch (error) {

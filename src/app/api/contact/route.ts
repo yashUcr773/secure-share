@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { ContactStorage } from '@/lib/storage';
 import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFToken } from '@/lib/security';
 
@@ -74,24 +75,20 @@ export async function POST(request: NextRequest) {
       email: sanitizeInput(email.toLowerCase().trim()),
       subject: sanitizeInput(subject),
       message: sanitizeInput(message),
-    };
-
-    // TODO: In a real application, you would:
-    // 1. Save the message to a database
-    // 2. Send an email to the support team
-    // 3. Send a confirmation email to the user
-    // 4. Add additional spam protection (captcha, etc.)
-    
-    console.log('Contact form submission:', {
+    };    // Save the contact message to storage
+    const savedMessage = await ContactStorage.saveMessage({
       ...sanitizedData,
-      timestamp: new Date().toISOString(),
       ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
     });
 
-    const response = NextResponse.json(
+    // In production, you would also:
+    // 1. Send an email to the support team
+    // 2. Send a confirmation email to the user
+    // 3. Add additional spam protection (captcha, etc.)
+    
       { 
         message: 'Message sent successfully',
-        id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        id: savedMessage.id
       },
       { status: 200 }
     );

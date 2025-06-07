@@ -6,6 +6,7 @@ import { jwtVerify } from 'jose';
 export interface JWTPayload {
   userId: string;
   email: string;
+  role: 'user' | 'admin';
   iat: number;
   exp: number;
   iss: string;
@@ -33,7 +34,10 @@ export class EdgeAuthService {
         issuer: 'secure-share',
         audience: 'secure-share-users'
       });      // Validate payload structure and cast
-      if (typeof payload.userId === 'string' && typeof payload.email === 'string') {
+      if (typeof payload.userId === 'string' && 
+          typeof payload.email === 'string' && 
+          typeof payload.role === 'string' &&
+          (payload.role === 'user' || payload.role === 'admin')) {
         return payload as unknown as JWTPayload;
       }
       
@@ -42,5 +46,12 @@ export class EdgeAuthService {
       console.error('Token verification error:', error);
       return null;
     }
+  }
+
+  /**
+   * Check if a user has admin privileges
+   */
+  static isAdmin(payload: JWTPayload): boolean {
+    return payload.role === 'admin';
   }
 }

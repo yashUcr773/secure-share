@@ -57,24 +57,81 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  // Content Security Policy
+  // Rewrites for clean URLs
   async rewrites() {
     return [];
   },
 
-  // Experimental features for better security
+  // External packages for server components
+  serverExternalPackages: ['jsonwebtoken'],
+
+  // Production optimizations
   experimental: {
-    serverComponentsExternalPackages: ['jsonwebtoken'],
+    optimizeCss: true,
+    optimizePackageImports: ['recharts', 'lucide-react'],
   },
+
+  // Compression and optimization
+  compress: true,
 
   // Image optimization configuration
   images: {
     domains: [], // Add allowed image domains here
     dangerouslyAllowSVG: false,
+    formats: ['image/webp', 'image/avif'],
+    minimumCacheTTL: 60,
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
   },
+
+  // Bundle analyzer for production optimization
+  ...(process.env.ANALYZE === 'true' && {
+    experimental: {
+      bundlePagesRouterDependencies: true,
+    },
+  }),
 
   // Disable x-powered-by header
   poweredByHeader: false,
+
+  // Output configuration for production
+  output: process.env.NODE_ENV === 'production' ? 'standalone' : undefined,
+
+  // Webpack optimizations
+  webpack: (config, { isServer, dev }) => {
+    // Production optimizations
+    if (!dev) {
+      config.optimization = {
+        ...config.optimization,
+        moduleIds: 'deterministic',
+        chunkIds: 'deterministic',
+        minimize: true,
+        sideEffects: false,
+      };
+
+      // Bundle splitting for better caching
+      config.optimization.splitChunks = {
+        ...config.optimization.splitChunks,
+        cacheGroups: {
+          ...config.optimization.splitChunks.cacheGroups,
+          vendor: {
+            test: /[\\/]node_modules[\\/]/,
+            name: 'vendors',
+            priority: 10,
+            chunks: 'all',
+          },
+          recharts: {
+            test: /[\\/]node_modules[\\/]recharts[\\/]/,
+            name: 'recharts',
+            priority: 20,
+            chunks: 'all',
+          },
+        },
+      };
+    }
+
+    return config;
+  },
 };
 
 export default nextConfig;

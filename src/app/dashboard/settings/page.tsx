@@ -9,10 +9,13 @@ import { Label } from "@/components/ui/label";
 import {  User, Shield, Bell, Trash2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCSRF } from "@/hooks/useCSRF";
+import { useEnhancedToast } from "@/hooks/useEnhancedToast";
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
-  const { csrfFetch } = useCSRF();const [profile, setProfile] = useState({
+  const { csrfFetch } = useCSRF();
+  const { showSuccess, showError, showWarning, profileUpdateSuccess, passwordChangeSuccess, settingsUpdateSuccess } = useEnhancedToast();
+  const [profile, setProfile] = useState({
     email: user?.email || "",
   });
   const [passwords, setPasswords] = useState({
@@ -30,11 +33,9 @@ export default function SettingsPage() {
     shareNotifications: true,
     securityAlerts: true,
   });
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [message, setMessage] = useState("");  const handleProfileUpdate = async (e: React.FormEvent) => {
+  const [isUpdating, setIsUpdating] = useState(false);  const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsUpdating(true);
-    setMessage("");
 
     try {
       const response = await csrfFetch('/api/auth/profile', {
@@ -43,33 +44,33 @@ export default function SettingsPage() {
       });
 
       if (response.ok) {
-        setMessage("Profile updated successfully!");
+        profileUpdateSuccess();
       } else {
         throw new Error('Failed to update profile');
       }
     } catch (error) {
-        console.error("Failed to update profile:", error);
-      setMessage("Failed to update profile. Please try again.");
+      console.error("Failed to update profile:", error);
+      showError(error, "Profile Update Failed");
     } finally {
       setIsUpdating(false);
     }
   };
-
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (passwords.new !== passwords.confirm) {
-      setMessage("New passwords don't match!");
+      showWarning("Password Mismatch", "New passwords don't match. Please try again.");
       return;
     }
 
     if (passwords.new.length < 8) {
-      setMessage("New password must be at least 8 characters long!");
+      showWarning("Password Too Short", "New password must be at least 8 characters long.");
       return;
     }
 
     setIsUpdating(true);
-    setMessage("");    try {
+
+    try {
       const response = await csrfFetch('/api/auth/password', {
         method: 'POST',
         body: JSON.stringify({
@@ -81,22 +82,22 @@ export default function SettingsPage() {
       const data = await response.json();
 
       if (response.ok) {
-        setMessage("Password changed successfully!");
+        passwordChangeSuccess();
         setPasswords({ current: "", new: "", confirm: "" });
       } else {
         throw new Error(data.error || 'Failed to change password');
       }
     } catch (error) {
-        console.error("Failed to change password:", error);
-      setMessage(error instanceof Error ? error.message : "Failed to change password. Please try again.");
+      console.error("Failed to change password:", error);
+      showError(error, "Password Change Failed");
     } finally {
       setIsUpdating(false);
     }
-  };
-  const handleNotificationUpdate = async (key: string, value: boolean) => {
+  };  const handleNotificationUpdate = async (key: string, value: boolean) => {
     const updatedSettings = { ...notifications, [key]: value };
     setNotifications(updatedSettings);
-      try {
+    
+    try {
       const response = await csrfFetch('/api/auth/notifications', {
         method: 'PUT',
         body: JSON.stringify(updatedSettings),
@@ -106,13 +107,14 @@ export default function SettingsPage() {
         // Revert change on error
         setNotifications(prev => ({ ...prev, [key]: !value }));
         throw new Error('Failed to update notification setting');
+      } else {
+        settingsUpdateSuccess("Notification preferences");
       }
     } catch (error) {
       console.error("Failed to update notification setting:", error);
-      setMessage("Failed to update notification setting. Please try again.");
+      showError(error, "Settings Update Failed");
     }
   };
-
   const handleDeleteAccount = async () => {
     const confirmText = "DELETE";
     const userInput = prompt(
@@ -121,20 +123,23 @@ export default function SettingsPage() {
     
     if (userInput !== confirmText) {
       return;
-    }    try {
+    }
+
+    try {
       const response = await csrfFetch('/api/auth/account', {
         method: 'DELETE',
       });
 
       if (response.ok) {
+        showSuccess("Account Deleted", "Your account has been permanently deleted.");
         logout();
       } else {
         const data = await response.json();
         throw new Error(data.error || 'Failed to delete account');
       }
     } catch (error) {
-        console.error("Failed to delete account:", error);
-      setMessage(error instanceof Error ? error.message : "Failed to delete account. Please try again.");
+      console.error("Failed to delete account:", error);
+      showError(error, "Account Deletion Failed");
     }
   };
 
@@ -147,23 +152,12 @@ export default function SettingsPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div>
+      <div className="max-w-4xl mx-auto space-y-6">        <div>
           <h1 className="text-3xl font-bold">Settings</h1>
           <p className="text-muted-foreground">
             Manage your account settings and preferences
           </p>
         </div>
-
-        {message && (
-          <div className={`p-4 rounded-md ${
-            message.includes("successfully") 
-              ? "bg-green-50 text-green-800 border border-green-200" 
-              : "bg-red-50 text-red-800 border border-red-200"
-          }`}>
-            {message}
-          </div>
-        )}
 
         {/* Profile Settings */}
         <Card>
