@@ -1,6 +1,65 @@
 // Configuration utilities for SecureShare
 // Handles environment variables and app settings
 
+// Enhanced JWT secret management for production security
+function validateJWTSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  const nodeEnv = process.env.NODE_ENV;
+  
+  // In production, JWT_SECRET is mandatory and must meet security requirements
+  if (nodeEnv === 'production') {
+    if (!secret) {
+      console.error('❌ SECURITY ERROR: JWT_SECRET environment variable is required in production');
+      process.exit(1);
+    }
+    
+    if (secret.length < 32) {
+      console.error('❌ SECURITY ERROR: JWT_SECRET must be at least 32 characters long in production');
+      process.exit(1);
+    }
+    
+    // Check for common weak secrets
+    const weakSecrets = [
+      'secret',
+      'jwt-secret',
+      'your-secret-key',
+      'dev-secret',
+      'development',
+      'test-secret'
+    ];
+    
+    if (weakSecrets.includes(secret.toLowerCase())) {
+      console.error('❌ SECURITY ERROR: JWT_SECRET appears to be a default/weak value. Use a strong, random secret in production');
+      process.exit(1);
+    }
+    
+    console.log('✅ JWT_SECRET validation passed');
+    return secret;
+  }
+  
+  // In development, provide a fallback but warn about it
+  if (!secret) {
+    const fallbackSecret = 'dev-fallback-secret-key-not-for-production-use-only-change-this-in-production';
+    console.warn('⚠️  WARNING: Using fallback JWT_SECRET in development. Set JWT_SECRET environment variable.');
+    return fallbackSecret;
+  }
+  
+  return secret;
+}
+
+// Session secret validation
+function validateSessionSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  const nodeEnv = process.env.NODE_ENV;
+  
+  if (nodeEnv === 'production' && !secret) {
+    console.error('❌ SECURITY ERROR: SESSION_SECRET environment variable is required in production');
+    process.exit(1);
+  }
+  
+  return secret || 'dev-session-secret-change-in-production';
+}
+
 export const config = {
   // App Settings
   baseUrl: process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000',
@@ -10,24 +69,57 @@ export const config = {
   storageDir: process.env.STORAGE_DIR || './data',
   maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760'), // 10MB default
   cleanupDays: parseInt(process.env.CLEANUP_DAYS || '30'),
-  
-  // Security Settings
+    // Security Settings
   encryptionAlgorithm: process.env.ENCRYPTION_ALGORITHM || 'AES-GCM',
-  keyDerivationIterations: parseInt(process.env.KEY_DERIVATION_ITERATIONS || '100000'),
+  keyDerivationIterations: parseInt(process.env.KEY_DERIVATION_ITERATIONS || '100000') || 100000,
   
   // Database Settings (for future use)
   databaseUrl: process.env.DATABASE_URL,
   redisUrl: process.env.REDIS_URL,
-    // Authentication Settings
-  jwtSecret: process.env.JWT_SECRET,
-  sessionSecret: process.env.SESSION_SECRET,
-    // Rate Limiting
+    // Authentication Settings with enhanced validation
+  jwtSecret: validateJWTSecret(),
+  sessionSecret: validateSessionSecret(),
+  
+  // JWT Configuration
+  jwt: {
+    secret: validateJWTSecret(),
+    accessTokenExpiry: process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m',
+    refreshTokenExpiry: process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d',
+    issuer: 'secure-share',
+    audience: 'secure-share-users'
+  },
+  
+  // Session Configuration
+  session: {
+    timeout: parseInt(process.env.SESSION_TIMEOUT || '3600000'), // 1 hour default
+    maxLoginAttempts: parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5'),
+    lockoutDuration: parseInt(process.env.LOCKOUT_DURATION || '1800000'), // 30 minutes default
+  },
+    // Rate Limiting - Optimized for production use
   rateLimit: {
-    uploadPerHour: parseInt(process.env.RATE_LIMIT_UPLOAD_PER_HOUR || '10'),
-    downloadPerHour: parseInt(process.env.RATE_LIMIT_DOWNLOAD_PER_HOUR || '100'),
-    authPerHour: parseInt(process.env.RATE_LIMIT_AUTH_PER_HOUR || '5'),
-    generalPerMinute: parseInt(process.env.RATE_LIMIT_GENERAL_PER_MINUTE || '60'),
-    maxConcurrentUploads: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT_UPLOADS || '3'),
+    // File operations - reasonable limits for real usage
+    uploadPerHour: parseInt(process.env.RATE_LIMIT_UPLOAD_PER_HOUR || '50'), // Increased from 10
+    downloadPerHour: parseInt(process.env.RATE_LIMIT_DOWNLOAD_PER_HOUR || '200'), // Increased from 100
+    
+    // Authentication - balanced security and usability
+    authPerHour: parseInt(process.env.RATE_LIMIT_AUTH_PER_HOUR || '20'), // Increased from 5
+    authPerMinute: parseInt(process.env.RATE_LIMIT_AUTH_PER_MINUTE || '5'), // New: short-term burst protection
+    
+    // General API usage
+    generalPerMinute: parseInt(process.env.RATE_LIMIT_GENERAL_PER_MINUTE || '100'), // Increased from 60
+    generalPerSecond: parseInt(process.env.RATE_LIMIT_GENERAL_PER_SECOND || '5'), // New: burst protection
+    
+    // Resource-intensive operations
+    maxConcurrentUploads: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT_UPLOADS || '5'), // Increased from 3
+    maxFileSize: parseInt(process.env.RATE_LIMIT_MAX_FILE_SIZE || '104857600'), // 100MB default
+    
+    // Security-sensitive operations
+    passwordResetPerHour: parseInt(process.env.RATE_LIMIT_PASSWORD_RESET_PER_HOUR || '3'), // New
+    verificationEmailPerHour: parseInt(process.env.RATE_LIMIT_VERIFICATION_EMAIL_PER_HOUR || '5'), // New
+    
+    // Share link access
+    shareAccessPerMinute: parseInt(process.env.RATE_LIMIT_SHARE_ACCESS_PER_MINUTE || '30'), // New
+    shareAccessPerHour: parseInt(process.env.RATE_LIMIT_SHARE_ACCESS_PER_HOUR || '500'), // New
   },
   
   // Email Settings (for future use)

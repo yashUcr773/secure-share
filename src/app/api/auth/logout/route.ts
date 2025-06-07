@@ -37,9 +37,7 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid request origin' },
         { status: 403 }
       ));
-    }
-
-    // Create response
+    }    // Create response
     const response = NextResponse.json(
       { message: 'Logout successful' },
       { status: 200 }
@@ -47,6 +45,14 @@ export async function POST(request: NextRequest) {
 
     // Clear the auth token cookie
     response.cookies.set('auth-token', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 0 // Expire immediately
+    });
+
+    // Clear the refresh token cookie
+    response.cookies.set('refresh-token', '', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',

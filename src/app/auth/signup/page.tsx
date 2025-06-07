@@ -26,13 +26,17 @@ export default function SignupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setError("");
-    
-    try {
+    setError("");    try {
       const result = await signup(email, password, confirmPassword);
       
       if (result.success) {
-        router.push("/dashboard");
+        if (result.requiresVerification) {
+          // Redirect to verification page with success message
+          router.push(`/auth/verify-email?signup=true&email=${encodeURIComponent(email)}`);
+        } else {
+          // Development mode - direct login
+          router.push("/dashboard");
+        }
       } else {
         setError(result.error || "Signup failed");
       }

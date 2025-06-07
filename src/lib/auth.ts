@@ -5,6 +5,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import jwt from 'jsonwebtoken';
 import { config } from './config';
+import { EmailService } from './email';
 
 // User interface
 export interface User {
@@ -16,15 +17,34 @@ export interface User {
   createdAt: string;
   updatedAt: string;
   isActive: boolean;
+  // Email verification
+  emailVerified: boolean;
+  emailVerificationToken?: string;
+  emailVerificationTokenExpiry?: string;
+  // Password reset
+  passwordResetToken?: string;
+  passwordResetTokenExpiry?: string;
+  // Security tracking
+  lastLoginAt?: string;
+  loginAttempts: number;
+  lockedUntil?: string;
+  // Session management
+  refreshTokens: string[];
+  sessionVersion: number;
 }
 
-// JWT payload interface
+// Enhanced JWT payload interface with additional security claims
 export interface JWTPayload {
   userId: string;
   email: string;
   role: 'user' | 'admin';
+  sessionId: string;
+  sessionVersion: number;
+  type: 'access' | 'refresh';
   iat: number;
   exp: number;
+  iss: string;
+  aud: string;
 }
 
 // Login result interface
@@ -112,11 +132,11 @@ export class AuthService {
       hashArray.set(new Uint8Array(derivedKey), salt.length);
 
       // Convert to base64
-      return btoa(String.fromCharCode.apply(null, Array.from(hashArray)));
-    } else {
+      return btoa(String.fromCharCode.apply(null, Array.from(hashArray)));    } else {
       // Node.js environment fallback
       const nodeCrypto = await import('crypto');
-      const derivedKey = nodeCrypto.pbkdf2Sync(password, salt, config.keyDerivationIterations, 32, 'sha256');
+      const iterations = config.keyDerivationIterations || 100000; // Fallback to 100000 if undefined
+      const derivedKey = nodeCrypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
       
       // Combine salt and derived key
       const hashArray = new Uint8Array(salt.length + derivedKey.length);
@@ -170,11 +190,11 @@ export class AuthService {
         
         // Compare keys
         return derivedKeyArray.length === storedKey.length &&
-               derivedKeyArray.every((byte, index) => byte === storedKey[index]);
-      } else {
+               derivedKeyArray.every((byte, index) => byte === storedKey[index]);      } else {
         // Node.js environment
         const nodeCrypto = await import('crypto');
-        const derivedKey = nodeCrypto.pbkdf2Sync(password, salt, config.keyDerivationIterations, 32, 'sha256');
+        const iterations = config.keyDerivationIterations || 100000; // Fallback to 100000 if undefined
+        const derivedKey = nodeCrypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
         
         return derivedKey.length === storedKey.length &&
                derivedKey.every((byte, index) => byte === storedKey[index]);
@@ -183,27 +203,79 @@ export class AuthService {
       console.error('Password verification error:', error);
       return false;
     }
-  }
-  /**
-   * Generate a JWT token with proper signing
-   */  static async generateToken(user: User): Promise<string> {
-    const payload: Omit<JWTPayload, 'iat' | 'exp'> = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    };
+  }  /**
+   * Generate a JWT token with proper signing and session management
+   */
+  static async generateToken(
+    user: User, 
+    type: 'access' | 'refresh' = 'access',
+    sessionId?: string
+  ): Promise<string> {
+    try {
+      const currentSessionId = sessionId || this.generateSessionId();
+      
+      const payload: Omit<JWTPayload, 'iat' | 'exp'> = {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        sessionId: currentSessionId,
+        sessionVersion: user.sessionVersion || 1,
+        type,
+        iss: 'secure-share',
+        aud: 'secure-share-users'
+      };
 
-    const secret = config.jwtSecret || 'dev-fallback-secret-key-not-for-production';
-    
-    if (!config.jwtSecret && config.nodeEnv === 'production') {
-      throw new Error('JWT_SECRET must be set in production');
+      const secret = config.jwtSecret || 'dev-fallback-secret-key-not-for-production';
+      
+      if (!config.jwtSecret && config.nodeEnv === 'production') {
+        throw new Error('JWT_SECRET must be set in production');
+      }
+
+      const expiresIn = type === 'access' ? '15m' : '7d';
+
+      // Use synchronous version for simplicity and test compatibility
+      const token = jwt.sign(payload, secret, {
+        expiresIn,
+        issuer: 'secure-share',
+        audience: 'secure-share-users'
+      });
+
+      if (!token) {
+        throw new Error('JWT token generation failed');
+      }
+
+      return token;
+    } catch (error) {
+      console.error('Token generation error:', error);
+      throw error;
     }
+  }
 
-    return jwt.sign(payload, secret, {
-      expiresIn: '24h',
-      issuer: 'secure-share',
-      audience: 'secure-share-users'
-    });
+  /**
+   * Generate access and refresh token pair
+   */
+  static async generateTokenPair(user: User): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    sessionId: string;
+  }> {
+    const sessionId = this.generateSessionId();
+    
+    const [accessToken, refreshToken] = await Promise.all([
+      this.generateToken(user, 'access', sessionId),
+      this.generateToken(user, 'refresh', sessionId)
+    ]);
+
+    return { accessToken, refreshToken, sessionId };
+  }
+
+  /**
+   * Generate a unique session ID
+   */
+  static generateSessionId(): string {
+    const timestamp = Date.now().toString(36);
+    const randomPart = Math.random().toString(36).substr(2, 12);
+    return `sess_${timestamp}_${randomPart}`;
   }
   /**
    * Verify and decode a JWT token with proper signature verification
@@ -277,13 +349,15 @@ export class AuthService {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         isActive: true,
-      };
-
-      // Save user
+        emailVerified: false, // Default to unverified
+        loginAttempts: 0,
+        sessionVersion: 1,
+        refreshTokens: [],
+      };      // Save user
       await this.saveUser(user);
 
       // Return user without password hash
-      const { ...userWithoutPassword } = user;
+      const { passwordHash: _, ...userWithoutPassword } = user;
       return { success: true, user: userWithoutPassword };
 
     } catch (error) {
@@ -302,12 +376,15 @@ export class AuthService {
       // Validate input
       if (!email || !password) {
         return { success: false, error: 'Email and password are required' };
-      }
-
-      // Get user by email
+      }      // Get user by email
       const user = await this.getUserByEmail(email);
       if (!user || !user.isActive) {
         return { success: false, error: 'Invalid email or password' };
+      }
+
+      // Check if email is verified (optional - can be disabled in development)
+      if (!user.emailVerified && process.env.NODE_ENV === 'production') {
+        return { success: false, error: 'Please verify your email address before logging in' };
       }
 
       // Verify password
@@ -317,10 +394,12 @@ export class AuthService {
       }
 
       // Generate token
-      const token = await this.generateToken(user);
+      const token = await this.generateToken(user);      // Update last login time
+      user.lastLoginAt = new Date().toISOString();
+      await this.saveUser(user);
 
       // Return user without password hash
-      const { ...userWithoutPassword } = user;
+      const { passwordHash, ...userWithoutPassword } = user;
       return { success: true, user: userWithoutPassword, token };
 
     } catch (error) {
@@ -470,6 +549,297 @@ export class AuthService {
     } catch (error) {
       console.error('Update user error:', error);
       return { success: false, error: 'User update failed' };
+    }
+  }
+
+  /**
+   * Generate email verification token
+   */
+  static generateEmailVerificationToken(): string {
+    return Math.random().toString(36).substr(2, 32) + Date.now().toString(36);
+  }
+
+  /**
+   * Generate password reset token
+   */
+  static generatePasswordResetToken(): string {
+    return Math.random().toString(36).substr(2, 32) + Date.now().toString(36);
+  }
+
+  /**
+   * Send email verification token (placeholder for email service)
+   */
+  static async initiateEmailVerification(userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const user = await this.getUserById(userId);
+      if (!user) {
+        return { success: false, error: 'User not found' };
+      }
+
+      if (user.emailVerified) {
+        return { success: false, error: 'Email already verified' };
+      }
+
+      const verificationToken = this.generateEmailVerificationToken();
+      const expiryDate = new Date();
+      expiryDate.setHours(expiryDate.getHours() + 24); // 24 hour expiry
+
+      await this.updateUser(userId, {
+        emailVerificationToken: verificationToken,
+        emailVerificationTokenExpiry: expiryDate.toISOString()
+      });      // TODO: Send email with verification link
+      const verificationLink = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/auth/verify-email?token=${verificationToken}`;
+      const emailResult = await EmailService.sendVerificationEmail(user.email, verificationLink);
+      
+      if (!emailResult.success) {
+        console.error('Failed to send verification email:', emailResult.error);
+        // Continue anyway - user can request another verification email
+      }
+
+      console.log(`Email verification token generated for user ${userId}: ${verificationToken}`);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Email verification initiation error:', error);
+      return { success: false, error: 'Failed to initiate email verification' };
+    }
+  }
+
+  /**
+   * Verify email with token
+   */
+  static async verifyEmail(token: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Find user by verification token
+      const usersDir = await fs.readdir(this.USERS_DIR);
+      const userFiles = usersDir.filter(file => file.endsWith('.json') && file !== 'index.json');
+      
+      for (const userFile of userFiles) {
+        const userPath = path.join(this.USERS_DIR, userFile);
+        const userContent = await fs.readFile(userPath, 'utf-8');
+        const user = JSON.parse(userContent) as User;
+        
+        if (user.emailVerificationToken === token) {
+          // Check if token is still valid
+          if (!user.emailVerificationTokenExpiry || 
+              new Date() > new Date(user.emailVerificationTokenExpiry)) {
+            return { success: false, error: 'Verification token expired' };
+          }
+
+          // Mark email as verified and clear token
+          await this.updateUser(user.id, {
+            emailVerified: true,
+            emailVerificationToken: undefined,
+            emailVerificationTokenExpiry: undefined
+          });
+
+          return { success: true };
+        }
+      }
+
+      return { success: false, error: 'Invalid verification token' };
+    } catch (error) {
+      console.error('Email verification error:', error);
+      return { success: false, error: 'Email verification failed' };
+    }
+  }
+
+  /**
+   * Initiate password reset
+   */
+  static async initiatePasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const user = await this.getUserByEmail(email);
+      if (!user || !user.isActive) {
+        // Don't reveal if email exists for security
+        return { success: true };
+      }
+
+      const resetToken = this.generatePasswordResetToken();
+      const expiryDate = new Date();
+      expiryDate.setHours(expiryDate.getHours() + 1); // 1 hour expiry
+
+      await this.updateUser(user.id, {
+        passwordResetToken: resetToken,
+        passwordResetTokenExpiry: expiryDate.toISOString()
+      });      // TODO: Send email with reset link
+      const resetLink = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/auth/reset-password?token=${resetToken}`;
+      const emailResult = await EmailService.sendPasswordResetEmail(user.email, resetLink);
+      
+      if (!emailResult.success) {
+        console.error('Failed to send password reset email:', emailResult.error);
+        // Still return success to prevent email enumeration
+      }
+
+      console.log(`Password reset token generated for user ${user.id}: ${resetToken}`);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Password reset initiation error:', error);
+      return { success: false, error: 'Failed to initiate password reset' };
+    }
+  }
+
+  /**
+   * Reset password with token
+   */
+  static async resetPassword(token: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Validate new password
+      if (!newPassword || newPassword.length < 8) {
+        return { success: false, error: 'Password must be at least 8 characters' };
+      }
+
+      // Find user by reset token
+      const usersDir = await fs.readdir(this.USERS_DIR);
+      const userFiles = usersDir.filter(file => file.endsWith('.json') && file !== 'index.json');
+      
+      for (const userFile of userFiles) {
+        const userPath = path.join(this.USERS_DIR, userFile);
+        const userContent = await fs.readFile(userPath, 'utf-8');
+        const user = JSON.parse(userContent) as User;
+        
+        if (user.passwordResetToken === token) {
+          // Check if token is still valid
+          if (!user.passwordResetTokenExpiry || 
+              new Date() > new Date(user.passwordResetTokenExpiry)) {
+            return { success: false, error: 'Reset token expired' };
+          }
+
+          // Hash new password
+          const passwordHash = await this.hashPassword(newPassword);
+
+          // Update password, clear reset token, and increment session version
+          await this.updateUser(user.id, {
+            passwordHash,
+            passwordResetToken: undefined,
+            passwordResetTokenExpiry: undefined,
+            sessionVersion: (user.sessionVersion || 1) + 1,
+            refreshTokens: [] // Invalidate all sessions
+          });
+
+          return { success: true };
+        }
+      }
+
+      return { success: false, error: 'Invalid reset token' };
+    } catch (error) {
+      console.error('Password reset error:', error);
+      return { success: false, error: 'Password reset failed' };
+    }
+  }
+
+  /**
+   * Refresh access token using refresh token
+   */
+  static async refreshToken(refreshToken: string): Promise<{
+    success: boolean;
+    accessToken?: string;
+    error?: string;
+  }> {
+    try {
+      const payload = await this.verifyToken(refreshToken);
+      if (!payload || payload.type !== 'refresh') {
+        return { success: false, error: 'Invalid refresh token' };
+      }
+
+      const user = await this.getUserById(payload.userId);
+      if (!user || !user.isActive) {
+        return { success: false, error: 'User not found or inactive' };
+      }
+
+      // Check if session version matches
+      if (payload.sessionVersion !== user.sessionVersion) {
+        return { success: false, error: 'Session invalidated' };
+      }
+
+      // Generate new access token
+      const accessToken = await this.generateToken(user, 'access', payload.sessionId);
+
+      return { success: true, accessToken };
+    } catch (error) {
+      console.error('Token refresh error:', error);
+      return { success: false, error: 'Token refresh failed' };
+    }
+  }
+
+  /**
+   * Invalidate user session (logout)
+   */
+  static async invalidateSession(sessionId: string, userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const user = await this.getUserById(userId);
+      if (!user) {
+        return { success: false, error: 'User not found' };
+      }
+
+      // Remove specific refresh token or increment session version to invalidate all
+      await this.updateUser(userId, {
+        sessionVersion: (user.sessionVersion || 1) + 1,
+        refreshTokens: [] // Clear all refresh tokens
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Session invalidation error:', error);
+      return { success: false, error: 'Session invalidation failed' };
+    }
+  }
+
+  /**
+   * Check account lockout status
+   */
+  static async checkAccountLockout(user: User): Promise<boolean> {
+    if (!user.lockedUntil) {
+      return false;
+    }
+
+    const lockoutExpiry = new Date(user.lockedUntil);
+    const now = new Date();
+
+    if (now < lockoutExpiry) {
+      return true; // Account is locked
+    }
+
+    // Clear lockout if expired
+    await this.updateUser(user.id, {
+      lockedUntil: undefined,
+      loginAttempts: 0
+    });
+
+    return false;
+  }
+
+  /**
+   * Record failed login attempt
+   */
+  static async recordFailedLoginAttempt(user: User): Promise<void> {
+    const attempts = (user.loginAttempts || 0) + 1;
+    const maxAttempts = 5;
+    const lockoutDuration = 30 * 60 * 1000; // 30 minutes
+
+    const updates: Partial<User> = {
+      loginAttempts: attempts
+    };
+
+    if (attempts >= maxAttempts) {
+      const lockoutExpiry = new Date(Date.now() + lockoutDuration);
+      updates.lockedUntil = lockoutExpiry.toISOString();
+    }
+
+    await this.updateUser(user.id, updates);
+  }
+
+  /**
+   * Clear login attempts on successful login
+   */
+  static async clearLoginAttempts(user: User): Promise<void> {
+    if (user.loginAttempts > 0 || user.lockedUntil) {
+      await this.updateUser(user.id, {
+        loginAttempts: 0,
+        lockedUntil: undefined,
+        lastLoginAt: new Date().toISOString()
+      });
     }
   }
 }

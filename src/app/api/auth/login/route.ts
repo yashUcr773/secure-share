@@ -57,19 +57,47 @@ export async function POST(request: NextRequest) {
         { error: 'Validation failed', details: validation.error.errors },
         { status: 400 }
       );
+    }    const { email, password } = validation.data;
+
+    // Get user first to check account lockout
+    const user = await AuthService.getUserByEmail(email);
+    if (user && !user.isActive) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Account is disabled' },
+        { status: 401 }
+      ));
     }
 
-    const { email, password } = validation.data;
+    // Check account lockout
+    if (user && await AuthService.checkAccountLockout(user)) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Account is temporarily locked due to too many failed login attempts. Please try again later.' },
+        { status: 423 }
+      ));
+    }
 
     // Authenticate user
     const result = await AuthService.login(email, password);
     
     if (!result.success) {
-      return NextResponse.json(
+      // Record failed login attempt if user exists
+      if (user) {
+        await AuthService.recordFailedLoginAttempt(user);
+      }
+      
+      return addSecurityHeaders(NextResponse.json(
         { error: result.error },
         { status: 401 }
-      );
+      ));
     }
+
+    // Clear any previous failed login attempts
+    if (user) {
+      await AuthService.clearLoginAttempts(user);
+    }
+
+    // Generate token pair for session management
+    const tokenPair = await AuthService.generateTokenPair(result.user!);
 
     // Create response with token
     const response = NextResponse.json(
@@ -78,12 +106,24 @@ export async function POST(request: NextRequest) {
         user: { id: result.user!.id, email: result.user!.email }
       },
       { status: 200 }
-    );    // Set token as HTTP-only cookie
-    response.cookies.set('auth-token', result.token!, {
+    );
+
+    // Set access token cookie (short-lived)
+    response.cookies.set('auth-token', tokenPair.accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 24 * 60 * 60 // 24 hours
+      maxAge: 15 * 60, // 15 minutes
+      path: '/'
+    });
+
+    // Set refresh token cookie (long-lived)
+    response.cookies.set('refresh-token', tokenPair.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60, // 7 days
+      path: '/'
     });
 
     // Add rate limit headers

@@ -126,11 +126,25 @@ function parseWindow(window: string): number {
   }
 }
 
-// Rate limiters for different endpoints
+// Rate limiters for different endpoints with optimized configurations
 export const uploadRateLimit = createRateLimiter(config.rateLimit.uploadPerHour, '1h');
 export const downloadRateLimit = createRateLimiter(config.rateLimit.downloadPerHour, '1h');
+
+// Authentication - dual layer protection (burst + sustained)
 export const authRateLimit = createRateLimiter(config.rateLimit.authPerHour, '1h');
-export const generalRateLimit = createRateLimiter(60, '1m'); // 60 requests per minute for general API
+export const authBurstRateLimit = createRateLimiter(config.rateLimit.authPerMinute, '1m');
+
+// General API - dual layer protection
+export const generalRateLimit = createRateLimiter(config.rateLimit.generalPerMinute, '1m');
+export const generalBurstRateLimit = createRateLimiter(config.rateLimit.generalPerSecond, '1s');
+
+// Security-sensitive operations
+export const passwordResetRateLimit = createRateLimiter(config.rateLimit.passwordResetPerHour, '1h');
+export const verificationEmailRateLimit = createRateLimiter(config.rateLimit.verificationEmailPerHour, '1h');
+
+// Share link access
+export const shareAccessRateLimit = createRateLimiter(config.rateLimit.shareAccessPerMinute, '1m');
+export const shareAccessHourlyRateLimit = createRateLimiter(config.rateLimit.shareAccessPerHour, '1h');
 
 // Helper function to get client IP
 export function getClientIP(request: NextRequest): string {

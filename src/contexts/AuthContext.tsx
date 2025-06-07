@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { useCSRF } from '@/hooks/useCSRF';
+import { authenticatedFetch, startTokenRefreshTimer } from '@/lib/token-refresh';
 
 interface User {
   id: string;
@@ -12,7 +13,12 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signup: (email: string, password: string, confirmPassword: string) => Promise<{ success: boolean; error?: string }>;
+  signup: (email: string, password: string, confirmPassword: string) => Promise<{ 
+    success: boolean; 
+    error?: string; 
+    requiresVerification?: boolean; 
+    message?: string; 
+  }>;
   logout: () => Promise<void>;
 }
 
@@ -22,16 +28,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const { csrfFetch } = useCSRF();
-
   // Check for existing auth session on mount
   useEffect(() => {
     checkAuthStatus();
-  }, []);
+    
+    // Start automatic token refresh if user is authenticated
+    const timer = setTimeout(() => {
+      if (user) {
+        startTokenRefreshTimer();
+      }
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [user]);
 
   const checkAuthStatus = async () => {
     try {
-      // Try to get user info from a protected endpoint
-      const response = await fetch('/api/auth/me');
+      // Try to get user info from a protected endpoint using authenticated fetch
+      const response = await authenticatedFetch('/api/auth/me');
       if (response.ok) {
         const userData = await response.json();
         setUser(userData.user);
@@ -63,7 +77,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Network error' };
     }
   };
-
   const signup = async (email: string, password: string, confirmPassword: string) => {
     try {
       const response = await csrfFetch('/api/auth/signup', {
@@ -74,9 +87,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await response.json();
 
       if (response.ok) {
-        // Auto-login after successful signup
-        const loginResult = await login(email, password);
-        return loginResult;
+        // In production, user needs to verify email first
+        if (process.env.NODE_ENV === 'production') {
+          return { 
+            success: true, 
+            requiresVerification: true, 
+            message: 'Account created successfully! Please check your email for verification instructions.' 
+          };
+        } else {
+          // In development, auto-login after successful signup
+          const loginResult = await login(email, password);
+          return loginResult;
+        }
       } else {
         return { success: false, error: data.error || 'Signup failed' };
       }
