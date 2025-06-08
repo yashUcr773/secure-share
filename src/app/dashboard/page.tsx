@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useEnhancedToast } from "@/hooks/useEnhancedToast";
 import { Upload, FolderOpen, File, Share2, Trash2, Edit, Plus, Search } from "lucide-react";
+import { DashboardWidgets } from "@/components/widgets/DashboardWidgets";
 
 interface FileItem {
   id: string;
@@ -150,8 +151,10 @@ export default function DashboardPage() {
                   <span>Share Multiple</span>
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </CardContent>          </Card>
+
+          {/* Custom Dashboard Widgets */}
+          <DashboardWidgets />
 
           {/* Folders */}
           <Card>

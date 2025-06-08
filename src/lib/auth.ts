@@ -866,4 +866,33 @@ export class AuthService {
       });
     }
   }
+
+  /**
+   * Validate session token
+   */
+  static async validateSession(token: string): Promise<{ valid: boolean; user?: User; error?: string }> {
+    try {
+      if (!config.jwtSecret) {
+        return { valid: false, error: 'JWT secret not configured' };
+      }
+
+      const payload = jwt.verify(token, config.jwtSecret) as JWTPayload;
+      
+      // Get user data
+      const user = await this.getUserById(payload.userId);
+      if (!user || !user.isActive) {
+        return { valid: false, error: 'User not found or inactive' };
+      }
+
+      // Check session version for invalidation
+      if (payload.sessionVersion !== user.sessionVersion) {
+        return { valid: false, error: 'Session invalidated' };
+      }
+
+      return { valid: true, user };
+    } catch (error) {
+      console.error('Session validation error:', error);
+      return { valid: false, error: 'Invalid or expired session' };
+    }
+  }
 }

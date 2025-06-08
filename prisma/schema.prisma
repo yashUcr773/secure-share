@@ -26,6 +26,10 @@ model User {
   emailVerificationTokenExpiry DateTime?
   passwordResetToken String?
   passwordResetTokenExpiry DateTime?
+  // Two-Factor Authentication
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret String?
+  twoFactorBackupCodes Json? // JSON array of backup codes
   theme       String   @default("system") // light, dark, system
   viewMode    String   @default("grid") // grid, list
   createdAt   DateTime @default(now())
@@ -36,6 +40,7 @@ model User {
   folders     Folder[]
   sharedLinks SharedLink[]
   sessions    Session[]
+  fileVersions FileVersion[]
   
   @@map("users")
 }
@@ -76,8 +81,32 @@ model File {
   user                User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
   folder              Folder?     @relation(fields: [folderId], references: [id], onDelete: SetNull)
   sharedLinks         SharedLink[]
+  versions            FileVersion[]
   
   @@map("files")
+}
+
+// FileVersion model for file versioning
+model FileVersion {
+  id                  String   @id @default(cuid())
+  fileId              String
+  versionNumber       Int
+  fileName            String
+  fileSize            Int
+  encryptedContent    String   // Base64 encoded encrypted content
+  salt                String   // Encryption salt
+  iv                  String   // Initialization vector
+  checksum            String   // File integrity checksum
+  changeDescription   String?  // Optional description of changes
+  userId              String   // Who created this version
+  createdAt           DateTime @default(now())
+  
+  // Relations
+  file                File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([fileId, versionNumber])
+  @@map("file_versions")
 }
 
 // Folder model for file organization

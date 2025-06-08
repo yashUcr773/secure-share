@@ -3,11 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { useCSRF } from '@/hooks/useCSRF';
 import { authenticatedFetch, startTokenRefreshTimer } from '@/lib/token-refresh';
-
-interface User {
-  id: string;
-  email: string;
-}
+import type { User } from '@/generated/prisma';
 
 interface AuthContextType {
   user: User | null;
@@ -85,23 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await csrfFetch('/api/auth/signup', {
         method: 'POST',
         body: JSON.stringify({ email, password, confirmPassword }),
-      });
-
-      const data = await response.json();
+      });      const data = await response.json();
 
       if (response.ok) {
-        // In production, user needs to verify email first
-        if (process.env.NODE_ENV === 'production') {
-          return { 
-            success: true, 
-            requiresVerification: true, 
-            message: 'Account created successfully! Please check your email for verification instructions.' 
-          };
-        } else {
-          // In development, auto-login after successful signup
-          const loginResult = await login(email, password);
-          return loginResult;
-        }
+        // Always require email verification for new signups
+        return { 
+          success: true, 
+          requiresVerification: true, 
+          message: data.message || 'Account created successfully! Please check your email for verification instructions.' 
+        };
       } else {
         return { success: false, error: data.error || 'Signup failed' };
       }

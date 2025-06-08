@@ -10,33 +10,40 @@ const updateTagsSchema = z.object({
 });
 
 // Handle CORS preflight requests
-export async function OPTIONS(request: NextRequest) {
-  return handleCORSPreflight(request);
+export async function OPTIONS(request: NextRequest): Promise<NextResponse> {
+  return handleCORSPreflight(request) || new NextResponse(null, { status: 200 });
 }
 
 // PATCH /api/files/[fileId]/tags - Update file tags
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { fileId: string } }
+  { params }: { params: Promise<{ fileId: string }> }
 ) {
-  try {
-    // Validate origin
-    if (!validateOrigin(request)) {
+  try {    // Validate origin
+    if (!validateOrigin(request, [process.env.NEXTAUTH_URL || 'http://localhost:3000'])) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid origin' },
         { status: 403 }
       ));
     }
 
-    const { fileId } = params;
+    const { fileId } = await params;
+      // Verify authentication
+    const token = request.cookies.get('auth-token')?.value;
     
-    // Verify authentication
+    if (!token) {
+      return addSecurityHeaders(NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      ));
+    }
+
     let userId;
     try {
-      const verification = await AuthService.verifyTokenFromRequest(request);
-      if (!verification.user) {
+      const verification = await AuthService.verifyToken(token);
+      if (!verification.valid || !verification.user) {
         return addSecurityHeaders(NextResponse.json(
-          { error: 'Authentication required' },
+          { error: 'Invalid token' },
           { status: 401 }
         ));
       }

@@ -61,15 +61,56 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const { email, password } = validation.data;
-
-    // Attempt login using enhanced auth service
+    const { email, password } = validation.data;    // Attempt login using enhanced auth service
     const result = await AuthService.login(email, password);
     
     if (!result.success) {
       return addSecurityHeaders(NextResponse.json(
         { error: result.error || 'Invalid email or password' },
         { status: 401 }
+      ));
+    }    // Check for 2FA requirement after successful password verification
+    const { UserService } = await import('@/lib/database');    const user = await UserService.getUserById(result.user!.id);
+    
+    if (user && (user as { twoFactorEnabled?: boolean }).twoFactorEnabled) {
+      // Store temporary session for 2FA verification
+      const tempSessionId = `2fa_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Store user data temporarily for 2FA completion (expires in 10 minutes)
+      const tempData = {
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        expiresAt: Date.now() + (10 * 60 * 1000) // 10 minutes
+      };      // In a real implementation, store this in Redis or database
+      // For now, we'll use a simple in-memory store with proper typing
+      if (typeof global !== 'undefined') {        interface TempSessionData {
+          userId: string;
+          email: string;
+          name: string | null;
+          accessToken: string | undefined;
+          refreshToken: string | undefined;
+          expiresAt: number;
+        }
+        
+        interface GlobalTempSessions {
+          tempSessions?: Map<string, TempSessionData>;
+        }
+        
+        const globalStore = global as unknown as GlobalTempSessions;
+        globalStore.tempSessions = globalStore.tempSessions || new Map<string, TempSessionData>();
+        globalStore.tempSessions.set(tempSessionId, tempData);
+      }
+      
+      return addSecurityHeaders(NextResponse.json(
+        { 
+          requires2FA: true,
+          tempSession: tempSessionId,
+          message: 'Please provide your 2FA verification code'
+        },
+        { status: 200 }
       ));
     }
 

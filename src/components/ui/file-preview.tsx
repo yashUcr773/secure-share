@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+/* eslint-disable jsx-a11y/alt-text */
+import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +11,6 @@ import {
   Video, 
   Music, 
   Archive, 
-  X,
   Download,
   Share2,
   Eye,

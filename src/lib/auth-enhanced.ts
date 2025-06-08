@@ -721,6 +721,30 @@ export class AuthService {
       return { success: false, error: 'Email verification failed' };
     }
   }
+
+  /**
+   * Validate authentication from request headers
+   */
+  static async validateAuth(request: Request): Promise<{ user: User | null; error?: string }> {
+    try {
+      const authHeader = request.headers.get('authorization');
+      if (!authHeader?.startsWith('Bearer ')) {
+        return { user: null, error: 'No valid authorization header' };
+      }
+
+      const token = authHeader.substring(7);
+      const verification = await this.verifyToken(token);
+
+      if (!verification.valid || !verification.user) {
+        return { user: null, error: verification.error || 'Invalid token' };
+      }
+
+      return { user: verification.user };
+    } catch (error) {
+      console.error('Auth validation error:', error);
+      return { user: null, error: 'Authentication failed' };
+    }
+  }
 }
 
 // Legacy compatibility layer for existing code

@@ -59,15 +59,22 @@ export class UserService {
     return prisma.user.findUnique({
       where: { id },
     });
-  }
-  static async updateUser(id: string, data: Partial<Pick<User, 'email' | 'name' | 'passwordHash' | 'emailVerified' | 'emailVerificationToken' | 'emailVerificationTokenExpiry' | 'passwordResetToken' | 'passwordResetTokenExpiry'>>): Promise<User> {
+  }  static async updateUser(id: string, data: Partial<Pick<User, 'email' | 'name' | 'passwordHash' | 'emailVerified' | 'emailVerificationToken' | 'emailVerificationTokenExpiry' | 'passwordResetToken' | 'passwordResetTokenExpiry' | 'twoFactorEnabled' | 'twoFactorSecret' | 'twoFactorBackupCodes'>>): Promise<User> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updateData: any = {
+      ...data,
+      email: data.email ? data.email.toLowerCase().trim() : undefined,
+      name: data.name ? data.name.trim() : undefined,
+    };
+    
+    // Handle JSON field properly
+    if (data.twoFactorBackupCodes !== undefined) {
+      updateData.twoFactorBackupCodes = data.twoFactorBackupCodes;
+    }
+    
     return prisma.user.update({
       where: { id },
-      data: {
-        ...data,
-        email: data.email ? data.email.toLowerCase().trim() : undefined,
-        name: data.name ? data.name.trim() : undefined,
-      },
+      data: updateData,
     });
   }
 
@@ -191,7 +198,6 @@ export class FileService {  static async createFile(data: {
       },
     });
   }
-
   static async getFileMetadata(id: string): Promise<Omit<File, 'encryptedContent'> | null> {
     return prisma.file.findUnique({
       where: { id },
@@ -205,6 +211,7 @@ export class FileService {  static async createFile(data: {
         isPasswordProtected: true,
         folderId: true,
         userId: true,
+        tags: true,
         createdAt: true,
         updatedAt: true,
         folder: true,
@@ -218,8 +225,7 @@ export class FileService {  static async createFile(data: {
       where: {
         userId,
         folderId: folderId || null,
-      },
-      select: {
+      },      select: {
         id: true,
         fileName: true,
         fileSize: true,
@@ -229,6 +235,7 @@ export class FileService {  static async createFile(data: {
         isPasswordProtected: true,
         folderId: true,
         userId: true,
+        tags: true,
         createdAt: true,
         updatedAt: true,
         folder: true,
@@ -421,9 +428,9 @@ export class SharedLinkService {
         [type === 'view' ? 'views' : 'downloads']: {
           increment: 1,
         },
-      },
+      }
     });
-  }
+}   
 
   static async toggleSharedLink(fileId: string, isActive: boolean): Promise<SharedLink> {
     return prisma.sharedLink.update({
@@ -720,4 +727,5 @@ export class TransactionService {
 
 // Export the singleton instance for direct use
 export { DatabaseService };
+export { prisma as database };  // Export as database alias for backwards compatibility
 export default prisma;

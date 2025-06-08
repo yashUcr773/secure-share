@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FileText, Share2, Trash2, Search, Filter, MoreHorizontal, Edit, Download, Copy, Eye, Tag, Grid3X3, List } from "lucide-react";
+import { FileText, Share2, Trash2, Search, Filter, MoreHorizontal, Download, Copy, Eye, Tag } from "lucide-react";
 import Link from "next/link";
 import { ViewModeToggle } from "@/components/ui/view-mode-toggle";
 import { BulkOperations } from "@/components/ui/bulk-operations";

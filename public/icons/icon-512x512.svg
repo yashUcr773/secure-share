@@ -1,0 +1,6 @@
+<!-- Larger PWA icon -->
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="64" fill="#2563eb"/>
+  <path d="M128 256L256 128L384 256L256 384L128 256Z" fill="white"/>
+  <circle cx="256" cy="256" r="64" fill="#2563eb"/>
+</svg>

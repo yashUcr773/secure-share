@@ -17,10 +17,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('system');
   const [actualTheme, setActualTheme] = useState<'light' | 'dark'>('light');
   const { user } = useAuth();
-
   useEffect(() => {
     // Load theme from user preferences or localStorage
-    const savedTheme = user?.theme || localStorage.getItem('theme') as Theme || 'system';
+    const savedTheme = (user?.theme as Theme) || (localStorage.getItem('theme') as Theme) || 'system';
     setThemeState(savedTheme);
   }, [user]);
 

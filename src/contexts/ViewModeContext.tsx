@@ -15,10 +15,9 @@ const ViewModeContext = createContext<ViewModeContextType | undefined>(undefined
 export function ViewModeProvider({ children }: { children: React.ReactNode }) {
   const [viewMode, setViewModeState] = useState<ViewMode>('grid');
   const { user } = useAuth();
-
   useEffect(() => {
     // Load view mode from user preferences or localStorage
-    const savedViewMode = user?.viewMode || localStorage.getItem('viewMode') as ViewMode || 'grid';
+    const savedViewMode = (user?.viewMode as ViewMode) || (localStorage.getItem('viewMode') as ViewMode) || 'grid';
     setViewModeState(savedViewMode);
   }, [user]);
 

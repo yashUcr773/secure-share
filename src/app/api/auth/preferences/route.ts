@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { validateAuth } from '@/lib/auth-enhanced';
+import AuthService from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, validateCSRFToken } from '@/lib/security';
-import { database } from '@/lib/database';
+import { prisma } from '@/lib/database';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -37,11 +37,9 @@ export async function PATCH(request: NextRequest) {
         { error: 'Invalid CSRF token' },
         { status: 403 }
       ));
-    }
-
-    // Validate authentication
-    const authResult = await validateAuth(request);
-    if (!authResult.valid || !authResult.user) {
+    }    // Validate authentication
+    const authResult = await AuthService.validateAuth(request);
+    if (!authResult.user) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -57,12 +55,10 @@ export async function PATCH(request: NextRequest) {
         { error: 'Validation failed', details: validation.error.errors },
         { status: 400 }
       ));
-    }
-
-    const { theme, viewMode } = validation.data;
+    }    const { theme, viewMode } = validation.data;
 
     // Update user preferences
-    const updateData: any = {};
+    const updateData: { theme?: string; viewMode?: string } = {};
     if (theme) updateData.theme = theme;
     if (viewMode) updateData.viewMode = viewMode;
 
@@ -71,9 +67,7 @@ export async function PATCH(request: NextRequest) {
         { error: 'No preferences to update' },
         { status: 400 }
       ));
-    }
-
-    await database.user.update({
+    }    await prisma.user.update({
       where: { id: authResult.user.id },
       data: updateData,
     });

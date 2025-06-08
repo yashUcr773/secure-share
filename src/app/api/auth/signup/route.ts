@@ -68,9 +68,7 @@ export async function POST(request: NextRequest) {
     const { email, password } = validation.data;
 
     // Sanitize email input
-    const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
-
-    // Create user account
+    const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());    // Create user account
     const result = await AuthService.register(sanitizedEmail, password);
     
     if (!result.success) {
@@ -80,14 +78,25 @@ export async function POST(request: NextRequest) {
       ));
     }
 
+    // Send verification email for new user
+    if (result.user) {
+      try {
+        await AuthService.initiateEmailVerification(result.user.id);
+      } catch (error) {
+        console.error('Failed to send verification email:', error);
+        // Don't fail the signup if email sending fails
+      }
+    }
+
     const response = NextResponse.json(
       { 
-        message: 'Account created successfully! You can now log in.',
+        message: 'Account created successfully! Please check your email for verification instructions.',
         user: { 
           id: result.user!.id, 
           email: result.user!.email,
           name: result.user!.name 
-        }
+        },
+        requiresVerification: true
       },
       { status: 201 }
     );
