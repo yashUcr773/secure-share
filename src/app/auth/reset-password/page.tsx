@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Header } from "@/components/Header";
 import { Shield, Eye, EyeOff, CheckCircle, XCircle, Loader2, Lock } from "lucide-react";
 import { useCSRF } from "@/hooks/useCSRF";
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -367,8 +367,7 @@ export default function ResetPasswordPage() {
                   </>
                 ) : (
                   <>
-                    <Lock className="mr-2 h-4 w-4" />
-                    Reset Password
+                    <Lock className="mr-2 h-4 w-4" />                  Reset Password
                   </>
                 )}
               </Button>
@@ -383,5 +382,27 @@ export default function ResetPasswordPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <Header />
+      <div className="flex justify-center pt-20">
+        <div className="flex items-center space-x-2">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span>Loading...</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }
