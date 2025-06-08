@@ -80,20 +80,6 @@ KEY_DERIVATION_ITERATIONS=100000
 - Manual cleanup via admin API
 - Automatic cleanup can be scheduled (future enhancement)
 
-## Testing
-
-Run storage tests:
-```bash
-npm run test:storage
-```
-
-This will:
-- Initialize storage directories
-- Save/retrieve test files
-- Verify encryption metadata handling
-- Test deletion and cleanup
-- Display storage statistics
-
 ## Production Considerations
 
 ### File Storage
