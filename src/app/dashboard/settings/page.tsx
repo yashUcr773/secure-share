@@ -6,6 +6,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {  User, Shield, Bell, Trash2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCSRF } from "@/hooks/useCSRF";
@@ -27,13 +38,14 @@ export default function SettingsPage() {
     current: false,
     new: false,
     confirm: false,
-  });
-  const [notifications, setNotifications] = useState({
+  });  const [notifications, setNotifications] = useState({
     emailNotifications: true,
     shareNotifications: true,
     securityAlerts: true,
   });
-  const [isUpdating, setIsUpdating] = useState(false);  const handleProfileUpdate = async (e: React.FormEvent) => {
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsUpdating(true);
 
@@ -114,16 +126,15 @@ export default function SettingsPage() {
       console.error("Failed to update notification setting:", error);
       showError(error, "Settings Update Failed");
     }
-  };
-  const handleDeleteAccount = async () => {
+  };  const handleDeleteAccount = async () => {
     const confirmText = "DELETE";
-    const userInput = prompt(
-      `This action cannot be undone. All your files and data will be permanently deleted.\n\nType "${confirmText}" to confirm:`
-    );
     
-    if (userInput !== confirmText) {
+    if (deleteConfirmation !== confirmText) {
+      showWarning("Confirmation Required", `Please type "${confirmText}" to confirm account deletion.`);
       return;
     }
+
+    setIsDeleting(true);
 
     try {
       const response = await csrfFetch('/api/auth/account', {
@@ -140,6 +151,9 @@ export default function SettingsPage() {
     } catch (error) {
       console.error("Failed to delete account:", error);
       showError(error, "Account Deletion Failed");
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmation("");
     }
   };
 
@@ -337,17 +351,51 @@ export default function SettingsPage() {
             <CardDescription>
               Irreversible and destructive actions
             </CardDescription>
-          </CardHeader>
-          <CardContent>
+          </CardHeader>          <CardContent>
             <div className="space-y-4">
               <div>
                 <h4 className="font-medium mb-2">Delete Account</h4>
                 <p className="text-sm text-muted-foreground mb-4">
                   Permanently delete your account and all associated data. This action cannot be undone.
                 </p>
-                <Button variant="destructive" onClick={handleDeleteAccount}>
-                  Delete Account
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive">
+                      Delete Account
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This action cannot be undone. This will permanently delete your account and remove all your data from our servers.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="space-y-2">
+                      <Label htmlFor="deleteConfirmation">
+                        Type <span className="font-mono font-bold">DELETE</span> to confirm:
+                      </Label>
+                      <Input
+                        id="deleteConfirmation"
+                        value={deleteConfirmation}
+                        onChange={(e) => setDeleteConfirmation(e.target.value)}
+                        placeholder="Type DELETE to confirm"
+                      />
+                    </div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel onClick={() => setDeleteConfirmation("")}>
+                        Cancel
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDeleteAccount}
+                        disabled={deleteConfirmation !== "DELETE" || isDeleting}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        {isDeleting ? "Deleting..." : "Delete Account"}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </div>
           </CardContent>

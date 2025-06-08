@@ -6,6 +6,7 @@ import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mail, MessageSquare, Phone, MapPin, Send, Check } from "lucide-react";
 import { useCSRF } from "@/hooks/useCSRF";
@@ -151,16 +152,14 @@ export default function ContactPage() {
                       placeholder="What's this about?"
                       required
                     />
-                  </div>
-
-                  <div className="space-y-2">
+                  </div>                  <div className="space-y-2">
                     <Label htmlFor="message">Message *</Label>
-                    <textarea
+                    <Textarea
                       id="message"
                       name="message"
                       value={formData.message}
                       onChange={handleChange}
-                      className="w-full h-32 px-3 py-2 border border-input bg-background rounded-md text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="h-32 resize-none"
                       placeholder="Tell us more about your inquiry..."
                       required
                     />

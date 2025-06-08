@@ -5,7 +5,9 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FileText,  Share2, Trash2, Search, Filter, MoreHorizontal } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { FileText,  Share2, Trash2, Search, Filter, MoreHorizontal, Edit, Download, Copy } from "lucide-react";
 import Link from "next/link";
 
 interface FileItem {
@@ -122,21 +124,21 @@ export default function FilesPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10"
             />
-          </div>
-          <div className="flex gap-2">
+          </div>          <div className="flex gap-2">
             <Button variant="outline" size="sm">
               <Filter className="h-4 w-4 mr-2" />
               Filter
             </Button>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as "name" | "date" | "size")}
-              className="px-3 py-2 border rounded-md text-sm"
-            >
-              <option value="date">Sort by Date</option>
-              <option value="name">Sort by Name</option>
-              <option value="size">Sort by Size</option>
-            </select>
+            <Select value={sortBy} onValueChange={(value) => setSortBy(value as "name" | "date" | "size")}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Sort by..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="date">Sort by Date</SelectItem>
+                <SelectItem value="name">Sort by Name</SelectItem>
+                <SelectItem value="size">Sort by Size</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -183,8 +185,7 @@ export default function FilesPage() {
                       <div className="text-sm text-muted-foreground text-right">
                         <div>{file.shares} shares</div>
                         <div>{file.downloads} downloads</div>
-                      </div>
-                      <div className="flex gap-1">
+                      </div>                      <div className="flex gap-1">
                         <Button size="sm" variant="ghost" asChild>
                           <Link href={`/share/${file.id}`}>
                             <Share2 className="h-4 w-4" />
@@ -197,9 +198,35 @@ export default function FilesPage() {
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="ghost">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="sm" variant="ghost">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem>
+                              <Edit className="h-4 w-4 mr-2" />
+                              Rename
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                              <Download className="h-4 w-4 mr-2" />
+                              Download
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                              <Copy className="h-4 w-4 mr-2" />
+                              Copy Link
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => handleDelete(file.id)}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
                   </div>
