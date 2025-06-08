@@ -16,10 +16,21 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('system');
   const [actualTheme, setActualTheme] = useState<'light' | 'dark'>('light');
-  const { user } = useAuth();
+  
+  // Safely get user from auth context
+  let user = null;
+  try {
+    const authContext = useAuth();
+    user = authContext?.user;
+  } catch (error) {
+    console.log("🚀 ~ ThemeProvider ~ error:", error)
+    // AuthProvider not ready yet, will use localStorage fallback
+    console.log('Auth context not ready, using fallback theme loading');
+  }
+
   useEffect(() => {
     // Load theme from user preferences or localStorage
-    const savedTheme = (user?.theme as Theme) || (localStorage.getItem('theme') as Theme) || 'system';
+    const savedTheme = (user?.theme as Theme) || (typeof window !== 'undefined' ? localStorage.getItem('theme') as Theme : null) || 'system';
     setThemeState(savedTheme);
   }, [user]);
 

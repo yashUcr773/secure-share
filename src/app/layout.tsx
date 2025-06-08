@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { AuthProvider } from "@/contexts/AuthContext";
-import { ThemeProvider } from "@/contexts/ThemeContext";
-import { ViewModeProvider } from "@/contexts/ViewModeContext";
-import { Toaster } from "@/components/ui/toaster";
+import ClientProviders from "@/components/ClientProviders";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,18 +13,20 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover"
+};
+
+export const themeColor = "#2563eb";
+
 export const metadata: Metadata = {
   title: "SecureShare - Secure File Sharing",
   description: "Upload, encrypt, and share your files with zero-knowledge security. Your data stays private with client-side encryption.",
   manifest: "/manifest.json",
-  themeColor: "#2563eb",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
-    viewportFit: "cover"
-  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -90,14 +89,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ThemeProvider>
-          <ViewModeProvider>
-            <AuthProvider>
-              {children}
-              <Toaster />
-            </AuthProvider>
-          </ViewModeProvider>
-        </ThemeProvider>
+        <ClientProviders>
+          {children}
+        </ClientProviders>
         
         {/* Service Worker Registration Script */}
         <script

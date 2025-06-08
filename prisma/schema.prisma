@@ -41,6 +41,8 @@ model User {
   sharedLinks SharedLink[]
   sessions    Session[]
   fileVersions FileVersion[]
+  dashboardLayout DashboardLayout?
+  activityLogs ActivityLog[]
   
   @@map("users")
 }
@@ -158,4 +160,40 @@ model RateLimitEntry {
   
   @@unique([identifier, action, windowStart])
   @@map("rate_limit_entries")
+}
+
+// DashboardLayout model for storing user dashboard configurations
+model DashboardLayout {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  widgets     Json     // JSON array of widget configurations
+  columns     Int      @default(12)
+  gap         Int      @default(16)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("dashboard_layouts")
+}
+
+// ActivityLog model for tracking user activities
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String   // upload, download, share, delete, etc.
+  entityType  String   // file, folder, link, etc.
+  entityId    String?  // ID of the affected entity
+  details     Json?    // Additional details about the action
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, createdAt])
+  @@index([action])
+  @@map("activity_logs")
 }

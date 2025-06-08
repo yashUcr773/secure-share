@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { SharedLinkService, RateLimitService } from '@/lib/database';
+import { SharedLinkService, RateLimitService, FileService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 import { CacheService } from '@/lib/cache';
 import { CompressionService } from '@/lib/compression';
 import { CDNService } from '@/lib/cdn';
 import { JobQueue } from '@/lib/job-queue';
+import { ActivityHelpers } from '@/lib/activity-logger';
 
 // Validation schema for shared link creation
 const createSharedLinkSchema = z.object({
@@ -278,9 +279,7 @@ export async function POST(request: NextRequest) {
     // Add rate limit headers
     response.headers.set('X-RateLimit-Limit', '10');
     response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
-    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
-
-    // Queue analytics job (async)
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());    // Queue analytics job (async)
     const jobQueue = JobQueue.getInstance();
     jobQueue.addJob('analytics-processing', {
       type: 'shared_link_created',
@@ -292,6 +291,24 @@ export async function POST(request: NextRequest) {
     }).catch(error => {
       console.warn('Failed to queue analytics job:', error);
     });
+
+    // Log shared link creation activity
+    try {
+      const userAgent = request.headers.get('user-agent') || 'unknown';
+      
+      // Get file metadata for logging
+      const fileMetadata = await FileService.getFileMetadata(sanitizedFileId);
+      
+      await ActivityHelpers.logSharedLinkCreated(
+        userId,
+        fileMetadata?.fileName || 'Unknown file',
+        sanitizedFileId,
+        ip,
+        userAgent
+      );
+    } catch (activityError) {
+      console.warn('Failed to log shared link creation activity:', activityError);
+    }
 
     return addSecurityHeaders(response);
 
@@ -419,9 +436,7 @@ export async function DELETE(request: NextRequest) {
     // Add rate limit headers
     response.headers.set('X-RateLimit-Limit', '20');
     response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
-    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());
-
-    // Queue analytics job (async)
+    response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());    // Queue analytics job (async)
     const jobQueue = JobQueue.getInstance();
     jobQueue.addJob('analytics-processing', {
       type: 'shared_link_deleted',
@@ -433,6 +448,24 @@ export async function DELETE(request: NextRequest) {
     }).catch(error => {
       console.warn('Failed to queue analytics job:', error);
     });
+
+    // Log shared link deletion activity
+    try {
+      const userAgent = request.headers.get('user-agent') || 'unknown';
+      
+      // Get file metadata for logging
+      const fileMetadata = await FileService.getFileMetadata(sanitizedFileId);
+      
+      await ActivityHelpers.logSharedLinkDeleted(
+        userId,
+        fileMetadata?.fileName || 'Unknown file',
+        sanitizedFileId,
+        ip,
+        userAgent
+      );
+    } catch (activityError) {
+      console.warn('Failed to log shared link deletion activity:', activityError);
+    }
 
     return addSecurityHeaders(response);
 

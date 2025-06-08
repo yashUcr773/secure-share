@@ -1,47 +1,47 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Header } from "@/components/Header";
 import { Sidebar } from "@/components/Sidebar";
-import { useAuth } from "@/contexts/AuthContext";
+import dynamic from "next/dynamic";
 
 interface DashboardLayoutProps {
   children: ReactNode;
 }
 
+// Create a client-only component that uses useAuth
+const AuthenticatedDashboard = dynamic(
+  () => import("./AuthenticatedDashboard"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    ),
+  }
+);
+
 export function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { user, loading } = useAuth();
+  const [mounted, setMounted] = useState(false);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-2 text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-muted-foreground">Please log in to access this page.</p>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
       <div className="flex">
-        <aside className="w-64 border-r bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <Sidebar />
-        </aside>
-        <main className="flex-1 overflow-hidden">
-          {children}
+        <Sidebar />
+        <main className="flex-1 p-6">
+          {mounted ? (
+            <AuthenticatedDashboard>{children}</AuthenticatedDashboard>
+          ) : (
+            <div className="flex items-center justify-center h-64">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          )}
         </main>
       </div>
     </div>

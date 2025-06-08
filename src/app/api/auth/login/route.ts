@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AuthService } from '@/lib/auth-enhanced';
 import { RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
+import { ActivityHelpers } from '@/lib/activity-logger';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -125,9 +126,7 @@ export async function POST(request: NextRequest) {
         }
       },
       { status: 200 }
-    );
-
-    // Set access token cookie (short-lived)
+    );    // Set access token cookie (short-lived)
     response.cookies.set('auth-token', result.accessToken!, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -144,6 +143,20 @@ export async function POST(request: NextRequest) {
       maxAge: 7 * 24 * 60 * 60, // 7 days
       path: '/'
     });
+
+    // Log user login activity
+    try {
+      const userAgent = request.headers.get('user-agent') || 'unknown';
+      
+      await ActivityHelpers.logUserLogin(
+        result.user!.id,
+        result.user!.email,
+        clientIp,
+        userAgent
+      );
+    } catch (activityError) {
+      console.warn('Failed to log login activity:', activityError);
+    }
 
     return addSecurityHeaders(response);
 

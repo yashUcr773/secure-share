@@ -6,6 +6,7 @@ import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput,
 import { CacheService } from '@/lib/cache';
 import { CDNService } from '@/lib/cdn';
 import { JobQueueHelpers, jobQueue } from '@/lib/job-queue';
+import { ActivityHelpers } from '@/lib/activity-logger';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -169,12 +170,28 @@ export async function POST(request: NextRequest) {
       }
     } catch (cdnError) {
       console.warn('Failed to generate CDN URL:', cdnError);
-    }
-
-    // Update the file with the custom shareId if provided
+    }    // Update the file with the custom shareId if provided
     if (shareId !== file.id) {
       // For now, use the generated ID. In a real implementation, you might want to
       // allow custom shareIds with proper validation to prevent conflicts
+    }
+
+    // Log file upload activity
+    try {
+      const clientIp = request.headers.get('x-forwarded-for') || 
+                      request.headers.get('x-real-ip') || 
+                      'unknown';
+      const userAgent = request.headers.get('user-agent') || 'unknown';
+      
+      await ActivityHelpers.logFileUpload(
+        userId || undefined,
+        sanitizedFileName,
+        fileSize,
+        clientIp,
+        userAgent
+      );
+    } catch (activityError) {
+      console.warn('Failed to log upload activity:', activityError);
     }
 
     const response = NextResponse.json({

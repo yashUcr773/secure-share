@@ -6,6 +6,7 @@ import { CacheService } from '@/lib/cache';
 import { CompressionService } from '@/lib/compression';
 import { CDNService } from '@/lib/cdn';
 import { JobQueue } from '@/lib/job-queue';
+import { ActivityHelpers } from '@/lib/activity-logger';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -107,6 +108,24 @@ export async function GET(
     } catch (error) {
       // Analytics update failure shouldn't break file access
       console.warn('Failed to update analytics:', error);
+    }
+
+    // Log file view activity
+    try {
+      const clientIp = request.headers.get('x-forwarded-for') || 
+                      request.headers.get('x-real-ip') || 
+                      'unknown';
+      const userAgent = request.headers.get('user-agent') || 'unknown';
+      
+      await ActivityHelpers.logFileView(
+        undefined, // Usually anonymous access via shared link
+        fileData.fileName || 'Unknown file',
+        sanitizedFileId,
+        clientIp,
+        userAgent
+      );
+    } catch (activityError) {
+      console.warn('Failed to log file view activity:', activityError);
     }
 
     // Prepare response data
@@ -257,6 +276,24 @@ export async function POST(
     } catch (error) {
       // Analytics update failure shouldn't break file download
       console.warn('Failed to update download analytics:', error);
+    }
+
+    // Log file download activity
+    try {
+      const clientIp = request.headers.get('x-forwarded-for') || 
+                      request.headers.get('x-real-ip') || 
+                      'unknown';
+      const userAgent = request.headers.get('user-agent') || 'unknown';
+      
+      await ActivityHelpers.logFileDownload(
+        undefined, // Usually anonymous access via shared link
+        fileData.fileName || 'Unknown file',
+        sanitizedFileId,
+        clientIp,
+        userAgent
+      );
+    } catch (activityError) {
+      console.warn('Failed to log file download activity:', activityError);
     }
 
     // Check if request accepts compression

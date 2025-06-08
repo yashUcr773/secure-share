@@ -6,6 +6,7 @@ import { CacheService } from '@/lib/cache';
 import { CompressionService } from '@/lib/compression';
 import { CDNService } from '@/lib/cdn';
 import { JobQueue } from '@/lib/job-queue';
+import { ActivityHelpers } from '@/lib/activity-logger';
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
@@ -214,10 +215,26 @@ export async function DELETE(request: NextRequest) {
         { error: 'File not found or access denied' },
         { status: 404 }
       ));
-    }
-
-    // Delete the file
+    }    // Delete the file
     await FileService.deleteFile(fileId);
+    
+    // Log file deletion activity
+    try {
+      const clientIp = request.headers.get('x-forwarded-for') || 
+                      request.headers.get('x-real-ip') || 
+                      'unknown';
+      const userAgent = request.headers.get('user-agent') || 'unknown';
+      
+      await ActivityHelpers.logFileDelete(
+        userId,
+        file.fileName || 'Unknown file',
+        fileId,
+        clientIp,
+        userAgent
+      );
+    } catch (activityError) {
+      console.warn('Failed to log file deletion activity:', activityError);
+    }
     
     return addSecurityHeaders(NextResponse.json({
       success: true,

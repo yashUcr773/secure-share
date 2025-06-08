@@ -1,5 +1,3 @@
-"use client";
-
 export const dynamic = 'force-dynamic';
 
 import { Suspense } from "react";
@@ -7,13 +5,13 @@ import dynamicImport from "next/dynamic";
 import { Header } from "@/components/Header";
 import { Loader2 } from "lucide-react";
 
-const AuthenticatedLogin = dynamicImport(() => import("@/components/AuthenticatedLogin"), {
+const AuthenticatedSignup = dynamicImport(() => import("@/components/AuthenticatedSignup"), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center p-4 pt-16">
       <div className="flex items-center space-x-2">
         <Loader2 className="h-6 w-6 animate-spin" />
-        <span>Loading login form...</span>
+        <span>Loading signup form...</span>
       </div>
     </div>
   ),
@@ -33,12 +31,12 @@ function LoadingFallback() {
   );
 }
 
-export default function LoginPage() {
+export default function SignupPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
       <Header />
       <Suspense fallback={<LoadingFallback />}>
-        <AuthenticatedLogin />
+        <AuthenticatedSignup />
       </Suspense>
     </div>
   );

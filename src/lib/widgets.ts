@@ -48,12 +48,28 @@ export interface DashboardLayout {
   lastModified: Date;
 }
 
-export class WidgetService {
-  // Get user's dashboard layout
+export class WidgetService {  // Get user's dashboard layout
   static async getDashboardLayout(userId: string): Promise<DashboardLayout> {    
-    // For now, return a default layout
-    // In the future, this would be stored in the database
-    return {
+    // Try to get saved layout from database
+    const savedLayout = await prisma.dashboardLayout.findUnique({
+      where: { userId },
+      select: {
+        widgets: true,
+        columns: true,
+        gap: true,
+        updatedAt: true
+      }
+    });    if (savedLayout) {
+      return {
+        widgets: JSON.parse(JSON.stringify(savedLayout.widgets)) as Widget[],
+        columns: savedLayout.columns,
+        gap: savedLayout.gap,
+        lastModified: savedLayout.updatedAt
+      };
+    }
+
+    // Return default layout for new users
+    const defaultLayout: DashboardLayout = {
       columns: 12,
       gap: 16,
       widgets: [
@@ -74,44 +90,76 @@ export class WidgetService {
           size: { width: 6, height: 4 },
           config: { limit: 5 },
           isVisible: true
+        },
+        {
+          id: 'activity-feed',
+          type: 'activity-feed',
+          title: 'Recent Activity',
+          position: { x: 0, y: 4, order: 3 },
+          size: { width: 6, height: 4 },
+          config: { days: 7 },
+          isVisible: true
+        },
+        {
+          id: 'sharing-stats',
+          type: 'sharing-stats',
+          title: 'Sharing Statistics',
+          position: { x: 6, y: 4, order: 4 },
+          size: { width: 6, height: 4 },
+          config: {},
+          isVisible: true
         }
       ],
       lastModified: new Date()
     };
-  }
 
-  // Update widget configuration
-  static async updateWidget(userId: string, widgetId: string, updates: Partial<Widget>): Promise<Widget> {
-    // Mock implementation - in a real app, this would update the database
-    const layout = await this.getDashboardLayout(userId);
-    const widget = layout.widgets.find(w => w.id === widgetId);
+    // Save the default layout to database
+    await this.updateLayout(userId, defaultLayout.widgets);
     
-    if (!widget) {
+    return defaultLayout;
+  }  // Update widget configuration
+  static async updateWidget(userId: string, widgetId: string, updates: Partial<Widget>): Promise<Widget> {
+    // Get the current layout
+    const layout = await this.getDashboardLayout(userId);
+    const widgetIndex = layout.widgets.findIndex(w => w.id === widgetId);
+    
+    if (widgetIndex === -1) {
       throw new Error('Widget not found');
     }
 
-    return { ...widget, ...updates };
+    // Update the widget
+    const updatedWidget = { ...layout.widgets[widgetIndex], ...updates };
+    layout.widgets[widgetIndex] = updatedWidget;
+    
+    // Save the updated layout to database
+    await this.updateLayout(userId, layout.widgets);
+    
+    return updatedWidget;
   }
 
   // Get a specific widget
   static async getWidget(userId: string, widgetId: string): Promise<Widget | null> {
     const layout = await this.getDashboardLayout(userId);
     return layout.widgets.find(w => w.id === widgetId) || null;
-  }
-
-  // Add a new widget
+  }  // Add a new widget
   static async addWidget(userId: string, widgetData: Omit<Widget, 'id'>): Promise<Widget> {
-    // Mock implementation - generate a new ID and return the widget
+    // Generate a unique ID for the new widget
     const newWidget: Widget = {
       ...widgetData,
       id: `widget-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
     };
+    
+    // Get current layout and add the new widget
+    const layout = await this.getDashboardLayout(userId);
+    layout.widgets.push(newWidget);
+    
+    // Save to database
+    await this.updateLayout(userId, layout.widgets);
+    
     return newWidget;
-  }
-
-  // Remove a widget
+  }  // Remove a widget
   static async removeWidget(userId: string, widgetId: string): Promise<void> {
-    // Mock implementation - in a real app, this would remove from database
+    // Get current layout
     const layout = await this.getDashboardLayout(userId);
     const widgetIndex = layout.widgets.findIndex(w => w.id === widgetId);
     
@@ -119,13 +167,35 @@ export class WidgetService {
       throw new Error('Widget not found');
     }
     
-    // In a real implementation, this would update the database
+    // Remove the widget
+    layout.widgets.splice(widgetIndex, 1);
+    
+    // Save updated layout to database
+    await this.updateLayout(userId, layout.widgets);
+    
     console.log(`Widget ${widgetId} removed for user ${userId}`);
-  }
-
-  // Update the entire dashboard layout
+  }  // Update the entire dashboard layout
   static async updateLayout(userId: string, widgets: Widget[]): Promise<void> {
-    // Mock implementation - in a real app, this would update the database
+    // Validate that the widgets array is valid
+    if (!widgets || !Array.isArray(widgets)) {
+      throw new Error('Invalid widgets array');
+    }
+    
+    // Upsert the dashboard layout in the database
+    await prisma.dashboardLayout.upsert({
+      where: { userId },
+      update: {
+        widgets: JSON.parse(JSON.stringify(widgets)),
+        updatedAt: new Date()
+      },
+      create: {
+        userId,
+        widgets: JSON.parse(JSON.stringify(widgets)),
+        columns: 12,
+        gap: 16
+      }
+    });
+    
     console.log(`Layout updated for user ${userId} with ${widgets.length} widgets`);
   }
 
@@ -143,12 +213,17 @@ export class WidgetService {
           return await this.getFileStatsData(userId, widget.config);
         
         case 'activity-feed':
-          return await this.getActivityFeedData(userId, widget.config);
-        
-        case 'sharing-stats':
+          return await this.getActivityFeedData(userId, widget.config);        case 'sharing-stats':
           return await this.getSharingStatsData(userId);
-          case 'security-status':
+          
+        case 'security-status':
           return await this.getSecurityStatusData(userId);
+        
+        case 'backup-status':
+          return await this.getBackupStatusData(userId);
+        
+        case 'custom-notes':
+          return await this.getCustomNotesData(userId, widget.config);
         
         case 'quick-upload':
           return { status: 'ready', message: 'Quick upload widget ready' };
@@ -212,28 +287,171 @@ export class WidgetService {
       }))
     };
   }
+  private static async getFileStatsData(userId: string, config: WidgetConfig): Promise<unknown> {
+    const timeRange = config.timeRange || '30d';
+    const chartType = config.chartType || 'line';
+    
+    // Calculate date range
+    const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : timeRange === '90d' ? 90 : 365;
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - days);
 
-  private static async getFileStatsData(_userId: string, _config: WidgetConfig): Promise<unknown> {
-    // Mock implementation
+    // Get file creation data from database
+    const files = await prisma.file.findMany({
+      where: {
+        userId,
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      select: {
+        createdAt: true,
+        fileSize: true
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+
+    // Group files by date
+    const filesByDate = new Map<string, { count: number; size: number }>();
+    
+    // Initialize all dates in range with zero values
+    for (let i = 0; i < days; i++) {
+      const date = new Date(startDate);
+      date.setDate(date.getDate() + i);
+      const dateStr = date.toISOString().split('T')[0];
+      filesByDate.set(dateStr, { count: 0, size: 0 });
+    }
+
+    // Aggregate file data by date
+    files.forEach(file => {
+      const dateStr = file.createdAt.toISOString().split('T')[0];
+      const existing = filesByDate.get(dateStr) || { count: 0, size: 0 };
+      filesByDate.set(dateStr, {
+        count: existing.count + 1,
+        size: existing.size + file.fileSize
+      });
+    });
+
+    // Convert to chart data array
+    const chartData = Array.from(filesByDate.entries()).map(([date, data]) => ({
+      date,
+      files: data.count,
+      size: data.size,
+      value: chartType === 'line' ? data.count : data.size
+    }));
+
     return {
-      chartData: [
-        { date: '2024-01-01', value: 10 },
-        { date: '2024-01-02', value: 8 },
-        { date: '2024-01-03', value: 12 },
-        { date: '2024-01-04', value: 6 },
-        { date: '2024-01-05', value: 15 }
-      ]
+      chartData,
+      chartType,
+      timeRange,
+      totalFiles: files.length,
+      totalSize: files.reduce((sum, file) => sum + file.fileSize, 0)
     };
-  }
+  }  private static async getActivityFeedData(userId: string, config: WidgetConfig): Promise<unknown> {
+    const days = config.days || 7;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
 
-  private static async getActivityFeedData(_userId: string, _config: WidgetConfig): Promise<unknown> {
-    // Mock implementation
+    // Get recent activities from the activity log
+    const activities = await prisma.activityLog.findMany({
+      where: {
+        userId,
+        createdAt: {
+          gte: startDate
+        }
+      },
+      select: {
+        action: true,
+        entityType: true,
+        entityId: true,
+        details: true,
+        createdAt: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      take: 20
+    });
+
+    // If we don't have enough activity log data, supplement with file/sharing data
+    if (activities.length < 10) {
+      const [recentFiles, recentSharedLinks] = await Promise.all([
+        prisma.file.findMany({
+          where: {
+            userId,
+            createdAt: { gte: startDate }
+          },
+          select: {
+            fileName: true,
+            createdAt: true,
+            fileSize: true
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 5
+        }),
+        prisma.sharedLink.findMany({
+          where: {
+            userId,
+            createdAt: { gte: startDate }
+          },
+          select: {
+            createdAt: true,
+            views: true,
+            downloads: true,
+            file: {
+              select: { fileName: true }
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 5
+        })
+      ]);
+
+      // Add file upload activities
+      recentFiles.forEach(file => {
+        activities.push({
+          action: 'upload',
+          entityType: 'file',
+          entityId: null,
+          details: { fileName: file.fileName, fileSize: file.fileSize },
+          createdAt: file.createdAt
+        });
+      });
+
+      // Add sharing activities
+      recentSharedLinks.forEach(link => {
+        activities.push({
+          action: 'share',
+          entityType: 'file',
+          entityId: null,
+          details: { fileName: link.file.fileName, views: link.views, downloads: link.downloads },
+          createdAt: link.createdAt
+        });
+      });
+    }
+
+    // Format activities for display
+    const formattedActivities = activities
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 15)
+      .map(activity => {
+        const details = activity.details as Record<string, unknown> || {};
+        return {
+          type: activity.action,
+          description: this.formatActivityDescription(activity.action, activity.entityType, details),
+          timestamp: activity.createdAt,
+          details
+        };
+      });
+    
     return {
-      activities: [
-        { type: 'upload', description: 'Uploaded document.pdf', timestamp: new Date() },
-        { type: 'share', description: 'Shared project-files.zip', timestamp: new Date() },
-        { type: 'download', description: 'Downloaded image.jpg', timestamp: new Date() }
-      ]
+      activities: formattedActivities,
+      timeRange: `${days} days`,
+      totalActivities: formattedActivities.length
     };
   }
 
@@ -283,6 +501,30 @@ export class WidgetService {
     score += 25; // Base encryption
     return score;
   }
+  private static formatActivityDescription(action: string, entityType: string, details: Record<string, unknown>): string {
+    const fileName = details.fileName as string || 'Unknown file';
+    
+    switch (action) {
+      case 'upload':
+        return `Uploaded ${fileName}`;
+      case 'download':
+        return `Downloaded ${fileName}`;
+      case 'share':
+        return `Shared ${fileName}`;
+      case 'delete':
+        return `Deleted ${fileName}`;
+      case 'update':
+        return `Updated ${fileName}`;
+      case 'view':
+        return `Viewed ${fileName}`;
+      case 'folder_create':
+        return `Created folder ${details.folderName || 'New Folder'}`;
+      case 'folder_delete':
+        return `Deleted folder ${details.folderName || 'Folder'}`;
+      default:
+        return `${action} ${entityType}`;
+    }
+  }
 
   private static formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 Bytes';
@@ -290,5 +532,44 @@ export class WidgetService {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  private static async getBackupStatusData(userId: string): Promise<unknown> {
+    // Get user's file statistics for backup status
+    const stats = await prisma.file.aggregate({
+      where: { userId },
+      _count: { id: true },
+      _sum: { fileSize: true }
+    });
+
+    const totalFiles = stats._count.id || 0;
+    const totalSize = stats._sum.fileSize || 0;
+
+    // Simulate backup status (in a real app, this would check actual backup systems)
+    const lastBackup = new Date();
+    lastBackup.setHours(lastBackup.getHours() - 24); // Last backup 24 hours ago
+
+    return {
+      totalFiles,
+      totalSize: this.formatFileSize(totalSize),
+      lastBackup,
+      backupStatus: 'completed',
+      nextBackup: new Date(Date.now() + 24 * 60 * 60 * 1000), // Next backup in 24 hours
+      backupEnabled: true
+    };
+  }
+
+  private static async getCustomNotesData(userId: string, config: WidgetConfig): Promise<unknown> {
+    // In a real implementation, you might store custom notes in a separate table
+    // For now, we'll return a simple structure
+    const noteContent = config.noteContent as string || 'Click to add your custom notes...';
+    const lastModified = config.lastModified as string || new Date().toISOString();
+
+    return {
+      content: noteContent,
+      lastModified: new Date(lastModified),
+      canEdit: true,
+      maxLength: 1000
+    };
   }
 }
