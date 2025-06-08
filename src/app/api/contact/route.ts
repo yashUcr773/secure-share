@@ -16,6 +16,8 @@ const contactFormSchema = z.object({
   email: z.string().email('Invalid email address'),
   subject: z.string().min(1, 'Subject is required').max(200, 'Subject too long'),
   message: z.string().min(10, 'Message must be at least 10 characters').max(1000, 'Message too long'),
+  type: z.enum(['general', 'feedback', 'feature', 'bug']).default('general'),
+  priority: z.enum(['low', 'medium', 'high']).default('medium'),
 });
 
 export async function POST(request: NextRequest) {
@@ -65,9 +67,7 @@ export async function POST(request: NextRequest) {
         { error: 'Validation failed', details: validation.error.errors },
         { status: 400 }
       ));
-    }
-
-    const { name, email, subject, message } = validation.data;
+    }    const { name, email, subject, message, type, priority } = validation.data;
 
     // Sanitize inputs to prevent XSS
     const sanitizedData = {
@@ -75,7 +75,9 @@ export async function POST(request: NextRequest) {
       email: sanitizeInput(email.toLowerCase().trim()),
       subject: sanitizeInput(subject),
       message: sanitizeInput(message),
-    };    // Save the contact message to storage
+      type,
+      priority,
+    };// Save the contact message to storage
     const savedMessage = await ContactStorage.saveMessage({
       ...sanitizedData,
       ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
@@ -83,11 +85,14 @@ export async function POST(request: NextRequest) {
     // 1. Send an email to the support team
     // 2. Send a confirmation email to the user
     // 3. Add additional spam protection (captcha, etc.)
-    
-    const response = NextResponse.json(
+      const response = NextResponse.json(
       { 
-        message: 'Message sent successfully',
-        id: savedMessage.id
+        message: type === 'feedback' ? 'Feedback received successfully' :
+                type === 'feature' ? 'Feature request submitted successfully' :
+                type === 'bug' ? 'Bug report submitted successfully' :
+                'Message sent successfully',
+        id: savedMessage.id,
+        type
       },
       { status: 200 }
     );

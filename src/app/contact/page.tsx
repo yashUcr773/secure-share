@@ -8,21 +8,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Mail, MessageSquare, Phone, MapPin, Send, Check } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Mail, MessageSquare, Phone, MapPin, Send, Check, Lightbulb, Heart, Bug } from "lucide-react";
 import { useCSRF } from "@/hooks/useCSRF";
 import { useEnhancedToast } from "@/hooks/useEnhancedToast";
 
 export default function ContactPage() {
   const { csrfFetch } = useCSRF();
-  const { showSuccess, showError } = useEnhancedToast();
-  const [formData, setFormData] = useState({
+  const { showSuccess, showError } = useEnhancedToast();  const [formData, setFormData] = useState({
     name: "",
     email: "",
     subject: "",
-    message: ""
+    message: "",
+    type: "general", // general, feedback, feature, bug
+    priority: "medium"
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [activeTab, setActiveTab] = useState("contact");
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({
@@ -57,10 +62,10 @@ export default function ContactPage() {
       setIsSubmitting(false);
     }
   };
-
   const resetForm = () => {
-    setFormData({ name: "", email: "", subject: "", message: "" });
+    setFormData({ name: "", email: "", subject: "", message: "", type: "general", priority: "medium" });
     setIsSubmitted(false);
+    setActiveTab("contact");
   };
 
   if (isSubmitted) {
@@ -73,15 +78,23 @@ export default function ContactPage() {
             <div className="space-y-4">
               <div className="bg-green-100 dark:bg-green-900/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
                 <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
-              </div>
-              <h1 className="text-3xl font-bold">Message Sent Successfully!</h1>
+              </div>              <h1 className="text-3xl font-bold">
+                {formData.type === "feedback" ? "Feedback Received!" :
+                 formData.type === "feature" ? "Feature Request Submitted!" :
+                 formData.type === "bug" ? "Bug Report Submitted!" :
+                 "Message Sent Successfully!"}
+              </h1>
               <p className="text-muted-foreground">
-                Thank you for contacting us. We&apos;ll get back to you within 24 hours.
+                {formData.type === "feedback" ? "Thank you for your valuable feedback! We appreciate you taking the time to help us improve." :
+                 formData.type === "feature" ? "Thank you for your feature request! Our product team will review it and consider it for future updates." :
+                 formData.type === "bug" ? "Thank you for reporting this bug! Our development team will investigate and work on a fix." :
+                 "Thank you for contacting us. We'll get back to you within 24 hours."}
               </p>
-            </div>
-
-            <Button onClick={resetForm} variant="outline">
-              Send Another Message
+            </div>            <Button onClick={resetForm} variant="outline">
+              {formData.type === "feedback" ? "Send More Feedback" :
+               formData.type === "feature" ? "Submit Another Request" :
+               formData.type === "bug" ? "Report Another Bug" :
+               "Send Another Message"}
             </Button>
           </div>
         </main>
@@ -100,90 +113,238 @@ export default function ContactPage() {
             <p className="text-xl text-muted-foreground">
               Get in touch with our team
             </p>
-          </div>
-
-          <div className="grid lg:grid-cols-2 gap-12">
-            {/* Contact Form */}
+          </div>          <div className="grid lg:grid-cols-2 gap-12">
+            {/* Contact Form with Tabs */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <MessageSquare className="h-5 w-5 text-primary" />
-                  Send us a Message
+                  Get in Touch
                 </CardTitle>
                 <CardDescription>
-                  Fill out the form below and we&apos;ll get back to you as soon as possible.
+                  Choose the type of inquiry and we&apos;ll route it to the right team.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="contact" className="text-xs">
+                      <Mail className="h-4 w-4 mr-1" />
+                      Contact
+                    </TabsTrigger>
+                    <TabsTrigger value="feedback" className="text-xs">
+                      <Heart className="h-4 w-4 mr-1" />
+                      Feedback
+                    </TabsTrigger>
+                    <TabsTrigger value="feature" className="text-xs">
+                      <Lightbulb className="h-4 w-4 mr-1" />
+                      Features
+                    </TabsTrigger>
+                    <TabsTrigger value="bug" className="text-xs">
+                      <Bug className="h-4 w-4 mr-1" />
+                      Bug Report
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="contact" className="mt-6">
+                    <div className="space-y-4 mb-6">
+                      <div className="flex items-center gap-2">
+                        <Mail className="h-5 w-5 text-blue-500" />
+                        <h3 className="font-semibold">General Inquiry</h3>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Have a question about our service, billing, or need technical support? Send us a message and we&apos;ll get back to you promptly.
+                      </p>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="feedback" className="mt-6">
+                    <div className="space-y-4 mb-6">
+                      <div className="flex items-center gap-2">
+                        <Heart className="h-5 w-5 text-pink-500" />
+                        <h3 className="font-semibold">Share Your Feedback</h3>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        We value your opinion! Tell us what you love about SecureShare, what could be improved, or share your experience with our service.
+                      </p>
+                      <div className="flex gap-2">
+                        <Badge variant="secondary">User Experience</Badge>
+                        <Badge variant="secondary">Performance</Badge>
+                        <Badge variant="secondary">Design</Badge>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="feature" className="mt-6">
+                    <div className="space-y-4 mb-6">
+                      <div className="flex items-center gap-2">
+                        <Lightbulb className="h-5 w-5 text-yellow-500" />
+                        <h3 className="font-semibold">Request a Feature</h3>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Have an idea that would make SecureShare even better? We&apos;re always looking to improve and would love to hear your suggestions!
+                      </p>
+                      <div className="flex gap-2">
+                        <Badge variant="outline">New Features</Badge>
+                        <Badge variant="outline">Integrations</Badge>
+                        <Badge variant="outline">UI/UX</Badge>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="bug" className="mt-6">
+                    <div className="space-y-4 mb-6">
+                      <div className="flex items-center gap-2">
+                        <Bug className="h-5 w-5 text-red-500" />
+                        <h3 className="font-semibold">Report a Bug</h3>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Found something that isn&apos;t working as expected? Help us fix it by providing detailed information about the issue.
+                      </p>
+                      <div className="flex gap-2">
+                        <Badge variant="destructive">Critical</Badge>
+                        <Badge variant="outline">Minor</Badge>
+                        <Badge variant="outline">Enhancement</Badge>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <form onSubmit={handleSubmit} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="name">Name *</Label>
+                        <Input
+                          id="name"
+                          name="name"
+                          value={formData.name}
+                          onChange={handleChange}
+                          placeholder="Your full name"
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="email">Email *</Label>
+                        <Input
+                          id="email"
+                          name="email"
+                          type="email"
+                          value={formData.email}
+                          onChange={handleChange}
+                          placeholder="your.email@example.com"
+                          required
+                        />
+                      </div>
+                    </div>
+
                     <div className="space-y-2">
-                      <Label htmlFor="name">Name *</Label>
+                      <Label htmlFor="subject">Subject *</Label>
                       <Input
-                        id="name"
-                        name="name"
-                        value={formData.name}
+                        id="subject"
+                        name="subject"
+                        value={formData.subject}
                         onChange={handleChange}
-                        placeholder="Your full name"
+                        placeholder={
+                          activeTab === "feedback" ? "Your feedback about..." :
+                          activeTab === "feature" ? "Feature request: " :
+                          activeTab === "bug" ? "Bug: Brief description" :
+                          "What's this about?"
+                        }
                         required
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email *</Label>
-                      <Input
-                        id="email"
-                        name="email"
-                        type="email"
-                        value={formData.email}
-                        onChange={handleChange}
-                        placeholder="your.email@example.com"
-                        required
-                      />
-                    </div>
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="subject">Subject *</Label>
-                    <Input
-                      id="subject"
-                      name="subject"
-                      value={formData.subject}
-                      onChange={handleChange}
-                      placeholder="What's this about?"
-                      required
-                    />
-                  </div>                  <div className="space-y-2">
-                    <Label htmlFor="message">Message *</Label>
-                    <Textarea
-                      id="message"
-                      name="message"
-                      value={formData.message}
-                      onChange={handleChange}
-                      className="h-32 resize-none"
-                      placeholder="Tell us more about your inquiry..."
-                      required
-                    />
-                  </div>
-
-                  <Button 
-                    type="submit" 
-                    className="w-full" 
-                    size="lg"
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <Send className="h-4 w-4 mr-2 animate-pulse" />
-                        Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="h-4 w-4 mr-2" />
-                        Send Message
-                      </>
+                    {(activeTab === "feature" || activeTab === "bug") && (
+                      <div className="space-y-2">
+                        <Label htmlFor="priority">Priority</Label>
+                        <Select 
+                          value={formData.priority} 
+                          onValueChange={(value) => setFormData(prev => ({ ...prev, priority: value, type: activeTab }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select priority" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="low">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                                Low Priority
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="medium">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                                Medium Priority
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="high">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                                High Priority
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     )}
-                  </Button>
-                </form>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="message">
+                        {activeTab === "feedback" ? "Your Feedback *" :
+                         activeTab === "feature" ? "Feature Description *" :
+                         activeTab === "bug" ? "Bug Details *" :
+                         "Message *"}
+                      </Label>
+                      <Textarea
+                        id="message"
+                        name="message"
+                        value={formData.message}
+                        onChange={(e) => setFormData(prev => ({ ...prev, message: e.target.value, type: activeTab }))}
+                        className="h-32 resize-none"
+                        placeholder={
+                          activeTab === "feedback" ? "Tell us what you think about SecureShare..." :
+                          activeTab === "feature" ? "Describe the feature you'd like to see. Include details about how it would help you..." :
+                          activeTab === "bug" ? "Please describe the bug, steps to reproduce it, and what you expected to happen..." :
+                          "Tell us more about your inquiry..."
+                        }
+                        required
+                      />
+                    </div>
+
+                    {activeTab === "bug" && (
+                      <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+                        <h4 className="font-medium text-sm">Help us help you faster:</h4>
+                        <ul className="text-xs text-muted-foreground space-y-1">
+                          <li>• What browser and version are you using?</li>
+                          <li>• What were you trying to do when the bug occurred?</li>
+                          <li>• Can you reproduce the issue consistently?</li>
+                          <li>• Include any error messages you saw</li>
+                        </ul>
+                      </div>
+                    )}
+
+                    <Button 
+                      type="submit" 
+                      className="w-full" 
+                      size="lg"
+                      disabled={isSubmitting}
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Send className="h-4 w-4 mr-2 animate-pulse" />
+                          Sending...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="h-4 w-4 mr-2" />
+                          {activeTab === "feedback" ? "Send Feedback" :
+                           activeTab === "feature" ? "Submit Feature Request" :
+                           activeTab === "bug" ? "Report Bug" :
+                           "Send Message"}
+                        </>
+                      )}
+                    </Button>
+                  </form>
+                </Tabs>
               </CardContent>
             </Card>
 
@@ -240,8 +401,7 @@ export default function ContactPage() {
                 </CardContent>
               </Card>
 
-              {/* FAQ Links */}
-              <Card>
+              {/* FAQ Links */}              <Card>
                 <CardHeader>
                   <CardTitle>Quick Help</CardTitle>
                   <CardDescription>
@@ -265,6 +425,47 @@ export default function ContactPage() {
                       <h4 className="font-medium">Account management</h4>
                       <p className="text-sm text-muted-foreground">Managing your SecureShare account</p>
                     </Link>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Community & Feedback */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Community & Feedback</CardTitle>
+                  <CardDescription>
+                    Join our community and help shape the future of SecureShare
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Heart className="h-4 w-4 text-pink-500" />
+                        <h4 className="font-medium">User Feedback</h4>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Share your experience and help us improve SecureShare
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg border bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-950/20 dark:to-orange-950/20">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Lightbulb className="h-4 w-4 text-yellow-500" />
+                        <h4 className="font-medium">Feature Requests</h4>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Suggest new features and improvements
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg border bg-gradient-to-r from-red-50 to-pink-50 dark:from-red-950/20 dark:to-pink-950/20">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Bug className="h-4 w-4 text-red-500" />
+                        <h4 className="font-medium">Bug Reports</h4>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Help us fix issues and improve stability
+                      </p>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
