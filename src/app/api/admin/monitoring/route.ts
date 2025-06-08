@@ -10,11 +10,20 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+interface InitStatus {
+  jobQueue: boolean;
+  cache: boolean;
+  compression: boolean;
+  cdn: boolean;
+  startTime: Date;
+  errors: string[];
+}
+
 interface SystemMetrics {
   timestamp: string;
   uptime: number;
   initialization: {
-    status: any;
+    status: InitStatus;
     healthy: boolean;
   };
   jobQueue: {

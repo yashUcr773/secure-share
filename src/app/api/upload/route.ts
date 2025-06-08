@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { FileService, UserService, RateLimitService } from '@/lib/database';
+import { FileService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFWithSession } from '@/lib/security';
 import { CacheService } from '@/lib/cache';

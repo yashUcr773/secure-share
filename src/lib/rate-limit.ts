@@ -79,11 +79,9 @@ const createRateLimiter = (requests: number, window: string) => {
       url: redisUrl,
       token: redisToken,
     });    // Convert window string to proper duration format for Upstash
-    const duration = convertToDuration(window);
-
-    return new Ratelimit({
+    const duration = convertToDuration(window);    return new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(requests, duration as any),
+      limiter: Ratelimit.slidingWindow(requests, duration as "1 s" | "1 m" | "1 h" | "1 d"),
       analytics: true,
     });
   } else {
@@ -172,7 +170,14 @@ export function createRateLimitIdentifier(request: NextRequest, prefix: string):
 // Middleware helper for rate limiting
 export async function checkRateLimit(
   request: NextRequest,
-  limiter: any,
+  limiter: { 
+    limit: (id: string) => Promise<{ 
+      success: boolean; 
+      reset: Date | number; 
+      remaining: number; 
+      limit: number; 
+    }> 
+  },
   identifier: string
 ): Promise<{
   success: boolean;
@@ -181,10 +186,18 @@ export async function checkRateLimit(
   try {
     const result = await limiter.limit(identifier);
     
+    // Handle both Date and number reset types
+    let resetTimestamp: number;
+    if (result.reset instanceof Date) {
+      resetTimestamp = Math.ceil(result.reset.getTime() / 1000);
+    } else {
+      resetTimestamp = typeof result.reset === 'number' ? result.reset : Math.ceil(Date.now() / 1000);
+    }
+    
     const headers: Record<string, string> = {
       'X-RateLimit-Limit': result.limit.toString(),
       'X-RateLimit-Remaining': result.remaining.toString(),
-      'X-RateLimit-Reset': Math.ceil(result.reset.getTime() / 1000).toString(),
+      'X-RateLimit-Reset': resetTimestamp.toString(),
     };
 
     return {
@@ -197,6 +210,92 @@ export async function checkRateLimit(
     return {
       success: true,
       headers: {}
+    };
+  }
+}
+
+// Simplified rate limit handler for API routes
+export async function rateLimitHandler(
+  request: NextRequest,
+  endpoint: string,
+  requests: number = 60,
+  windowMs: number = 60000
+): Promise<{
+  success: boolean;
+  headers: Record<string, string>;
+}> {
+  const identifier = createRateLimitIdentifier(request, endpoint);
+  
+  // Create a temporary rate limiter for this specific check
+  const windowSeconds = Math.ceil(windowMs / 1000);
+  const limiter = createRateLimiter(requests, `${windowSeconds}s`);
+  
+  try {
+    const result = await limiter.limit(identifier);
+    
+    // Handle both Upstash and Memory rate limiter response formats
+    let resetTime: number;
+    if (result.reset instanceof Date) {
+      resetTime = Math.ceil(result.reset.getTime() / 1000);
+    } else {
+      resetTime = typeof result.reset === 'number' ? result.reset : Math.ceil(Date.now() / 1000) + windowSeconds;
+    }
+    
+    const headers: Record<string, string> = {
+      'X-RateLimit-Limit': result.limit.toString(),
+      'X-RateLimit-Remaining': result.remaining.toString(),
+      'X-RateLimit-Reset': resetTime.toString(),
+    };
+
+    return {
+      success: result.success,
+      headers
+    };
+  } catch (error) {
+    console.error('Rate limit check failed:', error);
+    // In case of error, allow the request (fail open)
+    return {
+      success: true,
+      headers: {}
+    };
+  }
+}
+
+// Rate limit adapter that works with existing limiter and identifier pattern
+export async function rateLimitAdapter(
+  limiter: { limit: (id: string) => Promise<{ success: boolean; reset: Date | number; remaining: number; limit: number; }> },
+  identifier: string
+): Promise<{
+  success: boolean;
+  limit: number;
+  remaining: number;
+  reset: Date;
+}> {
+  try {
+    const result = await limiter.limit(identifier);
+    
+    // Handle both Upstash and Memory rate limiter response formats
+    let resetTime: Date;
+    if (result.reset instanceof Date) {
+      resetTime = result.reset;
+    } else {
+      resetTime = new Date(typeof result.reset === 'number' ? result.reset * 1000 : Date.now() + 60000);
+    }
+    
+    return {
+      success: result.success,
+      limit: result.limit,
+      remaining: result.remaining,
+      reset: resetTime
+    };
+  } catch (error) {
+    console.error('Rate limit check failed:', error);
+    // In case of error, allow the request (fail open)
+    return {
+      success: true,
+      limit: 100,
+      remaining: 99,
+      reset: new Date(Date.now() + 60000)
     };
   }
 }

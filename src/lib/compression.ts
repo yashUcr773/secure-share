@@ -3,7 +3,6 @@
 
 import { createGzip, createGunzip, gzip, gunzip } from 'zlib';
 import { promisify } from 'util';
-import { config } from './config';
 
 // Promisified compression functions
 const gzipAsync = promisify(gzip);
@@ -293,14 +292,13 @@ export class CompressionService {
       const compressed = await gzipAsync(sample);
       const sampleRatio = sampleSize / compressed.length;
       const estimatedCompressedSize = Math.round(originalSize / sampleRatio);
-      
-      return {
+        return {
         originalSize,
         estimatedCompressedSize,
         estimatedRatio: sampleRatio,
         worthCompressing: sampleRatio > 1.1 && originalSize > COMPRESSION_CONFIG.threshold,
       };
-    } catch (error) {
+    } catch {
       return {
         originalSize,
         estimatedCompressedSize: originalSize,
@@ -395,6 +393,13 @@ export class CompressionService {
       spaceSaved,
       spaceSavedPercentage,
     };
+  }
+
+  // Initialize compression service (for app initializer compatibility)
+  static async initialize(): Promise<void> {
+    console.log('Compression: Service initialized successfully');
+    // Compression service doesn't need special initialization
+    // All methods are static and ready to use
   }
 }
 

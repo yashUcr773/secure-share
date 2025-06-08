@@ -79,13 +79,12 @@ export async function POST(request: NextRequest) {
     const savedMessage = await ContactStorage.saveMessage({
       ...sanitizedData,
       ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
-    });
-
-    // In production, you would also:
+    });    // In production, you would also:
     // 1. Send an email to the support team
     // 2. Send a confirmation email to the user
     // 3. Add additional spam protection (captcha, etc.)
     
+    const response = NextResponse.json(
       { 
         message: 'Message sent successfully',
         id: savedMessage.id

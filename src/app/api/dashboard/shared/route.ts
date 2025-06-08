@@ -388,11 +388,9 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Sanitize file ID
-    const sanitizedFileId = sanitizeInput(fileId);
-
-    // Verify user owns this shared link by checking their shared links
+    const sanitizedFileId = sanitizeInput(fileId);    // Verify user owns this shared link by checking their shared links
     const userSharedLinks = await SharedLinkService.getUserSharedLinks(userId);
-    const linkExists = userSharedLinks.some((link: any) => link.fileId === sanitizedFileId);
+    const linkExists = userSharedLinks.some(link => link.fileId === sanitizedFileId);
     
     if (!linkExists) {
       return addSecurityHeaders(NextResponse.json(
@@ -402,7 +400,7 @@ export async function DELETE(request: NextRequest) {
     }    // Delete shared link using database service
     try {
       await SharedLinkService.deleteSharedLink(sanitizedFileId);
-    } catch (error) {
+    } catch {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Shared link not found' },
         { status: 404 }

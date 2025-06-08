@@ -13,27 +13,21 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // Rate limiting using database - very strict for account deletion
+    // Rate limiting for account deletion - very strict
     const clientIp = getClientIP(request);
     const identifier = `account_delete:${clientIp}`;
     const rateLimitResult = await RateLimitService.checkRateLimit(
       identifier, 
-      'account_deletion', 
-      2, // Only 2 attempts
-      24 * 60 * 60 * 1000 // per 24 hours
+      'account_delete', 
+      2, 
+      24 * 60 * 60 * 1000 // 2 attempts per day
     );
     
     if (!rateLimitResult.allowed) {
-      const response = NextResponse.json(
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many account deletion attempts. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value as string);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Origin validation for CSRF protection

@@ -6,7 +6,7 @@ import { CacheService } from './cache';
 import { CompressionService } from './compression';
 import { CDNService } from './cdn';
 
-interface InitializationStatus {
+export interface InitializationStatus {
   jobQueue: boolean;
   cache: boolean;
   compression: boolean;
@@ -62,10 +62,9 @@ class AppInitializer {
   private async initializeJobQueue(): Promise<void> {
     try {
       console.log('📋 Initializing job queue processors...');
-      
-      // Register analytics processing jobs
+        // Register analytics processing jobs
       jobQueue.registerProcessor('analytics-processing', async (job) => {
-        const { type, userId, ip, userAgent, timestamp, cached } = job.data;
+        const { type, userId } = job.data;
         
         // In a real implementation, this would:
         // 1. Aggregate analytics data
@@ -79,11 +78,9 @@ class AppInitializer {
         await new Promise(resolve => setTimeout(resolve, 100));
         
         return { success: true, processedAt: new Date().toISOString() };
-      });
-
-      // Register file processing jobs
+      });      // Register file processing jobs
       jobQueue.registerProcessor('file-processing', async (job) => {
-        const { fileId, operation, metadata } = job.data;
+        const { fileId, operation } = job.data;
         
         console.log(`📁 Processing file job: ${operation} for file ${fileId}`);
         
@@ -101,21 +98,20 @@ class AppInitializer {
         const { operation, patterns } = job.data;
         
         console.log(`🧹 Processing cache maintenance: ${operation}`);
-        
-        if (operation === 'cleanup') {
+          if (operation === 'cleanup') {
           await CacheService.cleanup();
         } else if (operation === 'invalidate' && patterns) {
-          for (const pattern of patterns) {
-            await CacheService.deletePattern(pattern);
+          // Ensure patterns is an array
+          const patternArray = Array.isArray(patterns) ? patterns : [patterns];
+          for (const pattern of patternArray) {
+            await CacheService.deletePattern(String(pattern));
           }
         }
         
         return { success: true, processedAt: new Date().toISOString() };
-      });
-
-      // Register storage maintenance jobs
+      });      // Register storage maintenance jobs
       jobQueue.registerProcessor('storage-maintenance', async (job) => {
-        const { operation, threshold } = job.data;
+        const { operation } = job.data;
         
         console.log(`💾 Processing storage maintenance: ${operation}`);
         
@@ -214,22 +210,15 @@ class AppInitializer {
       await this.initialize();
     }
 
-    console.log('📅 Scheduling maintenance tasks...');
-
-    // Schedule daily cache cleanup
+    console.log('📅 Scheduling maintenance tasks...');    // Schedule daily cache cleanup
     await jobQueue.addJob('cache-maintenance', {
       operation: 'cleanup'
     }, {
-      delay: 24 * 60 * 60 * 1000, // 24 hours
-      repeat: { cron: '0 2 * * *' } // Daily at 2 AM
-    });
-
-    // Schedule weekly storage maintenance
+      delay: 24 * 60 * 60 * 1000 // 24 hours
+    });    // Schedule weekly storage maintenance
     await jobQueue.addJob('storage-maintenance', {
       operation: 'cleanup',
       threshold: 0.8 // Clean up when 80% full
-    }, {
-      repeat: { cron: '0 3 * * 0' } // Weekly on Sunday at 3 AM
     });
 
     console.log('✅ Maintenance tasks scheduled');

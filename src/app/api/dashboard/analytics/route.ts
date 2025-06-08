@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { FileService, SharedLinkService, RateLimitService } from '@/lib/database';
+import { SharedLinkService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 import { CacheService } from '@/lib/cache';
@@ -118,38 +118,55 @@ export async function GET(request: NextRequest) {
       
       return addSecurityHeaders(response);
     }
+      // Get user's shared links for analytics
+    const sharedLinks = await SharedLinkService.getUserSharedLinks(userId);
     
-    // Get user's shared links and files for analytics
-    const [sharedLinks, userFiles] = await Promise.all([
-      SharedLinkService.getUserSharedLinks(userId),
-      FileService.getUserFiles(userId)
-    ]);
+    // Define the correct type for shared links with file relations
+    interface SharedLinkWithFile {
+      id: string;
+      fileId: string;
+      userId: string;
+      isActive: boolean;
+      views: number;
+      downloads: number;
+      expiresAt: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+      file: {
+        id: string;
+        fileName: string;
+        fileSize: number;
+        isPasswordProtected: boolean;
+      };
+    }
+    
+    // Type the shared links correctly
+    const typedSharedLinks = sharedLinks as SharedLinkWithFile[];
     
     // Calculate analytics
-    const totalViews = sharedLinks.reduce((sum: number, link) => sum + (link.views || 0), 0);
-    const totalDownloads = sharedLinks.reduce((sum: number, link) => sum + (link.downloads || 0), 0);
-    const totalShares = sharedLinks.length;
-    const activeLinks = sharedLinks.filter(link => 
+    const totalViews = typedSharedLinks.reduce((sum: number, link) => sum + (link.views || 0), 0);
+    const totalDownloads = typedSharedLinks.reduce((sum: number, link) => sum + (link.downloads || 0), 0);
+    const totalShares = typedSharedLinks.length;
+    const activeLinks = typedSharedLinks.filter(link => 
       link.isActive && (!link.expiresAt || new Date(link.expiresAt) > new Date())
-    ).length;
-      // Generate recent activity based on real shared links
-    const recentActivity = sharedLinks
+    ).length;      // Generate recent activity based on real shared links
+    const recentActivity = typedSharedLinks
       .slice(0, 10)
       .map((link, index) => ({
         id: `activity-${index}`,
         type: index % 3 === 0 ? 'view' : index % 3 === 1 ? 'download' : 'share',
-        fileName: (link as any).file?.fileName || 'Unknown File',
+        fileName: link.file?.fileName || 'Unknown File',
         timestamp: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
         userAgent: ['Chrome on Windows', 'Safari on macOS', 'Firefox on Linux'][index % 3],
       }));
     
     // Popular files based on actual analytics
-    const popularFiles = sharedLinks
+    const popularFiles = typedSharedLinks
       .sort((a, b) => ((b.views || 0) + (b.downloads || 0)) - ((a.views || 0) + (a.downloads || 0)))
       .slice(0, 5)
       .map(link => ({
         id: link.id,
-        fileName: (link as any).file?.fileName || 'Unknown File',
+        fileName: link.file?.fileName || 'Unknown File',
         views: link.views || 0,
         downloads: link.downloads || 0,
         shares: 1, // Each shared link represents one share
@@ -196,21 +213,19 @@ export async function GET(request: NextRequest) {
     };
 
     const responseText = JSON.stringify(responseData);
-    let response: NextResponse;
-
-    // Apply compression for larger responses
+    let response: NextResponse;    // Apply compression for larger responses
     if (responseText.length > 1024) {
       const compressionResult = await CompressionService.compress(responseText, {
         mimeType: 'application/json'
       });
       
-      if (compressionResult.success && compressionResult.data) {
+      if (compressionResult.compressed && compressionResult.data) {
         response = new NextResponse(compressionResult.data, {
           status: 200,
           headers: {
             'Content-Type': 'application/json',
-            'Content-Encoding': compressionResult.encoding || 'gzip',
-            'Content-Length': compressionResult.compressedSize?.toString() || '',
+            'Content-Encoding': compressionResult.algorithm === 'gzip' ? 'gzip' : 'identity',
+            'Content-Length': compressionResult.compressedSize.toString(),
           },
         });
       } else {
@@ -218,7 +233,7 @@ export async function GET(request: NextRequest) {
       }
     } else {
       response = NextResponse.json(responseData);
-    }    // Add rate limit headers
+    }// Add rate limit headers
     response.headers.set('X-RateLimit-Limit', '10');
     response.headers.set('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
     response.headers.set('X-RateLimit-Reset', rateLimitResult.resetTime.toString());

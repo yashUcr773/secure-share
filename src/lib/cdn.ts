@@ -2,7 +2,6 @@
 // Provides edge distribution and static asset optimization
 
 import { config } from './config';
-import { CacheService } from './cache';
 
 // CDN configuration
 const CDN_CONFIG = {
@@ -66,7 +65,7 @@ export interface EdgeLocation {
 }
 
 export class CDNService {
-  private static activeProvider: string | null = null;
+  private static activeProvider: keyof typeof CDN_CONFIG.providers | null = null;
   private static initialized = false;
 
   /**
@@ -341,9 +340,8 @@ export class CDNService {
       cdnProvider: 'cloudflare',
       error: result.success ? undefined : result.errors?.[0]?.message,
     };
-  }
-
-  private static async purgeAWSCache(paths: string[]): Promise<CDNResponse> {
+  }  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private static async purgeAWSCache(_paths: string[]): Promise<CDNResponse> {
     // AWS CloudFront cache invalidation would require AWS SDK
     // For now, return a mock response
     return {
@@ -401,8 +399,13 @@ export class CDNService {
       { city: 'Sydney', country: 'AU', region: 'Asia Pacific', datacenter: 'SYD' },
     ];
   }
-
-  private static async getCloudflareMetrics(): Promise<any> {
+  private static async getCloudflareMetrics(): Promise<{
+    hitRatio: number;
+    averageResponseTime: number;
+    bandwidthSaved: number;
+    requestsServed: number;
+    edgeLocations: number;
+  }> {
     // Mock metrics - in real implementation, fetch from Cloudflare Analytics API
     return {
       hitRatio: 0.85,
@@ -412,8 +415,13 @@ export class CDNService {
       edgeLocations: 250,
     };
   }
-
-  private static async getAWSMetrics(): Promise<any> {
+  private static async getAWSMetrics(): Promise<{
+    hitRatio: number;
+    averageResponseTime: number;
+    bandwidthSaved: number;
+    requestsServed: number;
+    edgeLocations: number;
+  }> {
     // Mock AWS CloudFront metrics
     return {
       hitRatio: 0.82,
@@ -423,8 +431,13 @@ export class CDNService {
       edgeLocations: 200,
     };
   }
-
-  private static async getFastlyMetrics(): Promise<any> {
+  private static async getFastlyMetrics(): Promise<{
+    hitRatio: number;
+    averageResponseTime: number;
+    bandwidthSaved: number;
+    requestsServed: number;
+    edgeLocations: number;
+  }> {
     // Mock Fastly metrics
     return {
       hitRatio: 0.88,
@@ -448,15 +461,15 @@ export class CDNService {
 
   private static isMinifiableAsset(type: string): boolean {
     return ['text/css', 'text/javascript', 'application/javascript', 'text/html'].includes(type);
-  }
-
-  private static async optimizeImage(content: Buffer, type: string): Promise<Buffer> {
+  }  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private static async optimizeImage(content: Buffer, _type: string): Promise<Buffer> {
     // Mock image optimization - in real implementation, use Sharp or similar
     // For now, just return the original content
     return content;
   }
 
-  private static async minifyAsset(content: Buffer, type: string): Promise<Buffer> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private static async minifyAsset(content: Buffer, _type: string): Promise<Buffer> {
     // Mock minification - in real implementation, use appropriate minifiers
     // For now, just return the original content
     return content;
@@ -523,6 +536,12 @@ export class CDNService {
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
+  }
+
+  // Initialize CDN service (for app initializer compatibility)
+  static async initialize(): Promise<void> {
+    this.init();
+    console.log('CDN: Service initialized successfully');
   }
 }
 

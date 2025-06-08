@@ -1,8 +1,6 @@
 // Email service for SecureShare
 // Handles sending verification and password reset emails
 
-import { config } from './config';
-
 export interface EmailTemplate {
   subject: string;
   html: string;
@@ -32,6 +30,7 @@ export class EmailService {
         console.log('HTML version available\n');
         return { success: true };
       }      // Production email sending with SendGrid
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const sgMail = require('@sendgrid/mail');
       
       if (!process.env.SENDGRID_API_KEY) {

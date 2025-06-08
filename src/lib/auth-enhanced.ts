@@ -286,9 +286,8 @@ export class AuthService {
         email: email.toLowerCase().trim(),
         passwordHash,
         name: name?.trim(),
-      });
-
-      // Return user without password hash
+      });      // Return user without password hash
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { passwordHash: _, ...userWithoutPassword } = user;
       return { success: true, user: userWithoutPassword };
 
@@ -318,12 +317,11 @@ export class AuthService {
       const isValidPassword = await this.verifyPassword(password, user.passwordHash);
       if (!isValidPassword) {
         return { success: false, error: 'Invalid email or password' };
-      }
-
-      // Generate tokens
+      }      // Generate tokens
       const { accessToken, refreshToken } = await this.generateTokens(user);
 
       // Return user without password hash
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { passwordHash: _, ...userWithoutPassword } = user;
       return { 
         success: true, 
@@ -464,9 +462,8 @@ export class AuthService {
       }
 
       // Update user
-      const updatedUser = await UserService.updateUser(userId, data);
-
-      // Return user without password hash
+      const updatedUser = await UserService.updateUser(userId, data);      // Return user without password hash
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { passwordHash: _, ...userWithoutPassword } = updatedUser;
       return { success: true, user: userWithoutPassword };
 
@@ -754,11 +751,10 @@ export class LegacyAuthService {
       return btoa(JSON.stringify(payload));
     }
   }
-
   /**
    * Simple token verification for development (deprecated)
    */
-  static async verifyToken(token: string): Promise<any> {
+  static async verifyToken(token: string): Promise<unknown> {
     console.warn('LegacyAuthService.verifyToken is deprecated. Use AuthService.verifyToken instead.');
     
     try {

@@ -116,10 +116,9 @@ export default function ForgotPasswordPage() {
               <div className="flex justify-center mb-4">
                 <CheckCircle className="h-12 w-12 text-green-500" />
               </div>
-              <CardTitle className="text-2xl">Check Your Email</CardTitle>
-              <CardDescription>
-                We've sent password reset instructions to your email address
-              </CardDescription>
+              <CardTitle className="text-2xl">Check Your Email</CardTitle>            <CardDescription>
+              We&apos;ve sent password reset instructions to your email address
+            </CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-4">
@@ -127,10 +126,9 @@ export default function ForgotPasswordPage() {
                 <div className="flex items-center gap-2 mb-2">
                   <Mail className="h-4 w-4 text-green-600" />
                   <span className="font-medium text-green-800">Email Sent!</span>
-                </div>
-                <p className="text-sm text-green-700">
+                </div>                <p className="text-sm text-green-700">
                   If an account with the email <strong>{email}</strong> exists, 
-                  we've sent a password reset link to your inbox.
+                  we&apos;ve sent a password reset link to your inbox.
                 </p>
               </div>
 
@@ -138,7 +136,7 @@ export default function ForgotPasswordPage() {
                 <p>• Check your email inbox and spam folder</p>
                 <p>• Click the reset link in the email</p>
                 <p>• The link will expire in 1 hour for security</p>
-                <p>• If you don't see the email, you can request another one below</p>
+                <p>• If you don&apos;t see the email, you can request another one below</p>
               </div>
 
               {error && (
@@ -192,9 +190,8 @@ export default function ForgotPasswordPage() {
               <Shield className="h-8 w-8 text-primary" />
               <span className="text-2xl font-bold">SecureShare</span>
             </div>
-            <CardTitle className="text-2xl">Forgot Password?</CardTitle>
-            <CardDescription>
-              Enter your email address and we'll send you a link to reset your password
+            <CardTitle className="text-2xl">Forgot Password?</CardTitle>            <CardDescription>
+              Enter your email address and we&apos;ll send you a link to reset your password
             </CardDescription>
           </CardHeader>
 
@@ -220,8 +217,7 @@ export default function ForgotPasswordPage() {
               </div>
 
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
-                <p className="text-sm text-blue-800">
-                  <strong>Security Note:</strong> For your protection, we'll only send reset instructions 
+                <p className="text-sm text-blue-800">                  <strong>Security Note:</strong> For your protection, we&apos;ll only send reset instructions 
                   if this email is associated with an active account.
                 </p>
               </div>
@@ -247,7 +243,7 @@ export default function ForgotPasswordPage() {
                   Back to Login
                 </Link>
                 <p className="text-sm text-muted-foreground">
-                  Don't have an account? <Link href="/auth/signup" className="text-primary hover:underline">Sign up</Link>
+                  Don&apos;t have an account? <Link href="/auth/signup" className="text-primary hover:underline">Sign up</Link>
                 </p>
               </div>
             </CardFooter>

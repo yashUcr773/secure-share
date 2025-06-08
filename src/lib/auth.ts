@@ -380,9 +380,8 @@ export class AuthService {
         sessionVersion: 1,
         refreshTokens: [],
       };      // Save user
-      await this.saveUser(user);
-
-      // Return user without password hash
+      await this.saveUser(user);      // Return user without password hash
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { passwordHash: _, ...userWithoutPassword } = user;
       return { success: true, user: userWithoutPassword };
 
@@ -422,9 +421,8 @@ export class AuthService {
       // Generate token
       const token = await this.generateToken(user);      // Update last login time
       user.lastLoginAt = new Date().toISOString();
-      await this.saveUser(user);
-
-      // Return user without password hash
+      await this.saveUser(user);      // Return user without password hash
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { passwordHash, ...userWithoutPassword } = user;
       return { success: true, user: userWithoutPassword, token };
 

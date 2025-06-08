@@ -321,9 +321,7 @@ export class FileStorage {
       let oldestDate = new Date();
       let newestDate = new Date(0);
       let oldestFile = null;
-      let newestFile = null;
-
-      for (const [x, metadata] of files) {
+      let newestFile = null;      for (const [, metadata] of files) {
         const fileMeta = metadata as StoredFile;
         totalSize += fileMeta.fileSize || 0;
         
@@ -539,9 +537,7 @@ export class FileStorage {
       const indexContent = await fs.readFile(this.SHARED_LINKS_INDEX_FILE, 'utf-8');
       const index = JSON.parse(indexContent);
 
-      const userLinks: SharedLink[] = [];
-
-      for (const [fileId, linkData] of Object.entries(index)) {
+      const userLinks: SharedLink[] = [];      for (const [, linkData] of Object.entries(index)) {
         const link = linkData as SharedLink;
         // Include links that belong to the user OR links without a userId (backward compatibility)
         if (link.userId === userId || (!link.userId && userId === 'anonymous')) {

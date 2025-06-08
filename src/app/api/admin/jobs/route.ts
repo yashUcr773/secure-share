@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { EdgeAuthService } from '@/lib/auth-edge';
-import { jobQueue, JobQueueHelpers } from '@/lib/job-queue';
+import { jobQueue, JobQueueHelpers, type JobStatus, type JobType, type Job } from '@/lib/job-queue';
 import { rateLimitHandler } from '@/lib/rate-limit';
 
 export async function GET(request: NextRequest) {
@@ -23,8 +23,16 @@ export async function GET(request: NextRequest) {
     }
 
     // Verify authentication and admin privileges
-    const authResult = await EdgeAuthService.verifyToken(request);
-    if (!authResult.success || !authResult.payload) {
+    const token = request.cookies.get('auth-token')?.value;
+    if (!token) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const authResult = await EdgeAuthService.verifyToken(token);
+    if (!authResult) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -32,7 +40,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if user is admin
-    if (!EdgeAuthService.isAdmin(authResult.payload)) {
+    if (!EdgeAuthService.isAdmin(authResult)) {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -70,19 +78,16 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({
           success: true,
           job,
-        });
-
-      case 'jobs':
-        let jobs;
+        });      case 'jobs':
+        let jobs: Job[];
         if (status) {
-          jobs = jobQueue.getJobsByStatus(status as any);
+          jobs = jobQueue.getJobsByStatus(status as JobStatus);
         } else if (type) {
-          jobs = jobQueue.getJobsByType(type as any);
+          jobs = jobQueue.getJobsByType(type as JobType);
         } else {
-          // Get recent jobs (last 100)
-          const allJobs = Array.from((jobQueue as any).jobs.values());
-          jobs = allJobs
-            .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+          // Get recent jobs (last 100) - use getAllJobs method
+          jobs = jobQueue.getAllJobs()
+            .sort((a: Job, b: Job) => b.updatedAt.getTime() - a.updatedAt.getTime())
             .slice(0, 100);
         }
         return NextResponse.json({
@@ -123,8 +128,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify authentication and admin privileges
-    const authResult = await EdgeAuthService.verifyToken(request);
-    if (!authResult.success || !authResult.payload) {
+    const token = request.cookies.get('auth-token')?.value;
+    if (!token) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const authResult = await EdgeAuthService.verifyToken(token);
+    if (!authResult) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -132,7 +145,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user is admin
-    if (!EdgeAuthService.isAdmin(authResult.payload)) {
+    if (!EdgeAuthService.isAdmin(authResult)) {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -235,8 +248,16 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Verify authentication and admin privileges
-    const authResult = await EdgeAuthService.verifyToken(request);
-    if (!authResult.success || !authResult.payload) {
+    const token = request.cookies.get('auth-token')?.value;
+    if (!token) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const authResult = await EdgeAuthService.verifyToken(token);
+    if (!authResult) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -244,7 +265,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Check if user is admin
-    if (!EdgeAuthService.isAdmin(authResult.payload)) {
+    if (!EdgeAuthService.isAdmin(authResult)) {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }

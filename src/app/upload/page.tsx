@@ -11,7 +11,7 @@ import { FileEncryption } from "@/lib/crypto";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useCSRF } from "@/hooks/useCSRF";
 import { useEnhancedToast } from "@/hooks/useEnhancedToast";
-import { validateFileSize, validateFileType, withRetry } from "@/lib/errors";
+import { validateFileSize, validateFileType } from "@/lib/errors";
 import { config } from "@/lib/config";
 
 export default function UploadPage() {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuthService } from '@/lib/auth-enhanced';
 import { RateLimitService, UserService } from '@/lib/database';
-import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFWithSession } from '@/lib/security';
+import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 import { getClientIP } from '@/lib/rate-limit';
 import { CacheService } from '@/lib/cache';
 import { jobQueue } from '@/lib/job-queue';

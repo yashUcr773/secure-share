@@ -1,7 +1,7 @@
 // CSRF token management hook for SecureShare
 // Provides client-side CSRF token generation and management
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export interface CSRFTokenData {
   token: string;
@@ -15,11 +15,10 @@ export function useCSRF() {
 
   // Token expiration time (30 minutes)
   const TOKEN_EXPIRY = 30 * 60 * 1000;
-
   /**
    * Generate a new CSRF token
    */
-  const generateToken = (): string => {
+  const generateToken = useCallback((): string => {
     // Generate a cryptographically secure random token
     const array = new Uint8Array(32);
     
@@ -50,19 +49,18 @@ export function useCSRF() {
     }
     
     return token;
-  };
-
+  }, []);
   /**
    * Check if the current token is valid and not expired
    */
-  const isTokenValid = (tokenData: CSRFTokenData | null): boolean => {
+  const isTokenValid = useCallback((tokenData: CSRFTokenData | null): boolean => {
     if (!tokenData || !tokenData.token) return false;
     
     const now = Date.now();
     const tokenAge = now - tokenData.generated;
     
     return tokenAge < TOKEN_EXPIRY;
-  };
+  }, [TOKEN_EXPIRY]);
 
   /**
    * Get or generate a CSRF token
@@ -76,13 +74,12 @@ export function useCSRF() {
     // Generate new token if current one is invalid or expired
     return generateToken();
   };
-
   /**
    * Refresh the CSRF token (force regeneration)
    */
-  const refreshToken = (): string => {
+  const refreshToken = useCallback((): string => {
     return generateToken();
-  };
+  }, [generateToken]);
 
   /**
    * Get headers object with CSRF token
@@ -126,11 +123,10 @@ export function useCSRF() {
     } catch (error) {
       console.warn('Failed to restore CSRF token from sessionStorage:', error);
     }
-    
-    // Generate new token if none exists or stored token is invalid
+      // Generate new token if none exists or stored token is invalid
     generateToken();
     setIsLoading(false);
-  }, []);
+  }, [generateToken, isTokenValid]);
 
   // Auto-refresh token before expiration
   useEffect(() => {
@@ -144,7 +140,7 @@ export function useCSRF() {
     }, refreshTime);
     
     return () => clearTimeout(timer);
-  }, [csrfToken]);
+  }, [csrfToken, TOKEN_EXPIRY, refreshToken]);
 
   return {
     token: csrfToken,

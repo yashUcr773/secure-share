@@ -2,7 +2,6 @@
 // Provides Redis-based caching with fallback to in-memory storage
 
 import { Redis } from '@upstash/redis';
-import { config } from './config';
 
 // Cache result interface
 export interface CacheResult<T> {
@@ -22,10 +21,10 @@ const CACHE_CONFIG = {
 
 // In-memory cache fallback for development
 class MemoryCache {
-  private cache = new Map<string, { data: any; expiry: number }>();
+  private cache = new Map<string, { data: unknown; expiry: number }>();
   private maxSize = 1000; // Prevent memory leaks
 
-  set(key: string, value: any, ttlSeconds: number): void {
+  set(key: string, value: unknown, ttlSeconds: number): void {
     // Cleanup old entries if cache is full
     if (this.cache.size >= this.maxSize) {
       const now = Date.now();
@@ -34,11 +33,12 @@ class MemoryCache {
           this.cache.delete(k);
         }
       }
-      
-      // If still full, remove oldest entries
+        // If still full, remove oldest entries
       if (this.cache.size >= this.maxSize) {
         const oldestKey = this.cache.keys().next().value;
-        this.cache.delete(oldestKey);
+        if (oldestKey) {
+          this.cache.delete(oldestKey);
+        }
       }
     }
 
@@ -58,11 +58,9 @@ class MemoryCache {
     if (entry.expiry < Date.now()) {
       this.cache.delete(key);
       return { hit: false };
-    }
-
-    return {
+    }    return {
       hit: true,
-      data: entry.data,
+      data: entry.data as T,
       ttl: Math.floor((entry.expiry - Date.now()) / 1000),
     };
   }
@@ -104,9 +102,8 @@ export class CacheService {
 
     this.initialized = true;
   }
-
   // Generic cache operations
-  static async set(key: string, value: any, ttlSeconds?: number): Promise<void> {
+  static async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
     this.init();
     const ttl = ttlSeconds || CACHE_CONFIG.defaultTTL;
 
@@ -184,9 +181,8 @@ export class CacheService {
       this.memoryCache.clear();
     }
   }
-
   // Specialized cache methods for common use cases
-  static async cacheFileMetadata(fileId: string, metadata: any): Promise<void> {
+  static async cacheFileMetadata(fileId: string, metadata: unknown): Promise<void> {
     await this.set(`file:metadata:${fileId}`, metadata, CACHE_CONFIG.fileMetadataTTL);
   }
 
@@ -194,15 +190,14 @@ export class CacheService {
     return this.get<T>(`file:metadata:${fileId}`);
   }
 
-  static async cacheUserData(userId: string, userData: any): Promise<void> {
+  static async cacheUserData(userId: string, userData: unknown): Promise<void> {
     await this.set(`user:data:${userId}`, userData, CACHE_CONFIG.userDataTTL);
   }
 
   static async getUserData<T>(userId: string): Promise<CacheResult<T>> {
     return this.get<T>(`user:data:${userId}`);
   }
-
-  static async cacheSharedLink(fileId: string, linkData: any): Promise<void> {
+  static async cacheSharedLink(fileId: string, linkData: unknown): Promise<void> {
     await this.set(`shared:link:${fileId}`, linkData, CACHE_CONFIG.sharedLinksTTL);
   }
 
@@ -210,7 +205,7 @@ export class CacheService {
     return this.get<T>(`shared:link:${fileId}`);
   }
 
-  static async cacheAnalytics(key: string, data: any): Promise<void> {
+  static async cacheAnalytics(key: string, data: unknown): Promise<void> {
     await this.set(`analytics:${key}`, data, CACHE_CONFIG.analyticsDataTTL);
   }
 
@@ -227,7 +222,6 @@ export class CacheService {
     await this.delete(`file:metadata:${fileId}`);
     await this.delete(`shared:link:${fileId}`);
   }
-
   // Cache statistics
   static async getStats(): Promise<{
     backend: 'redis' | 'memory';
@@ -235,9 +229,13 @@ export class CacheService {
     redisConnected?: boolean;
   }> {
     this.init();
-
-    const stats: any = {
-      backend: this.redis ? 'redis' : 'memory',
+    
+    const stats = {
+      backend: this.redis ? 'redis' as const : 'memory' as const,
+    } as {
+      backend: 'redis' | 'memory';
+      memorySize?: number;
+      redisConnected?: boolean;
     };
 
     if (this.redis) {
@@ -274,6 +272,53 @@ export class CacheService {
       console.error('Cache warm-up error:', error);
     }
   }
+
+  // Initialize cache service (for app initializer compatibility)
+  static async initialize(): Promise<void> {
+    this.init();
+    await this.warmUp();
+  }
+
+  // Cleanup old cache entries
+  static async cleanup(): Promise<void> {
+    console.log('Cache: Starting cleanup...');
+    
+    try {
+      if (this.redis) {
+        // For Redis, we can't easily clean up expired keys, they auto-expire
+        // But we can clean up specific patterns if needed
+        console.log('Cache: Redis auto-expires keys, cleanup not needed');
+      } else {
+        // For memory cache, clear all entries (simple cleanup)
+        this.memoryCache.clear();
+        console.log('Cache: Memory cache cleared');
+      }
+    } catch (error) {
+      console.error('Cache cleanup error:', error);
+    }
+  }
+
+  // Delete keys matching a pattern
+  static async deletePattern(pattern: string): Promise<void> {
+    this.init();
+
+    try {
+      if (this.redis) {
+        const keys = await this.redis.keys(pattern);
+        if (keys.length > 0) {
+          await this.redis.del(...keys);
+        }
+      } else {
+        // For memory cache, we'd need to implement pattern matching
+        // For now, just clear all if pattern is '*'
+        if (pattern === '*') {
+          this.memoryCache.clear();
+        }
+      }
+    } catch (error) {
+      console.error('Cache deletePattern error:', error);
+    }
+  }
 }
 
 // Cache middleware for Next.js API routes
@@ -298,10 +343,10 @@ export function withCache<T>(
 
 // Cache decorators for class methods
 export function Cached(key: string, ttl?: number) {
-  return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
+  return function (target: unknown, propertyKey: string, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value;
 
-    descriptor.value = async function (...args: any[]) {
+    descriptor.value = async function (...args: unknown[]) {
       const cacheKey = `${key}:${JSON.stringify(args)}`;
       const cached = await CacheService.get(cacheKey);
       

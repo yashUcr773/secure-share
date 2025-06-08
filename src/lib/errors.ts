@@ -5,15 +5,15 @@ export interface ApiError {
   message: string;
   code?: string;
   status?: number;
-  details?: any;
+  details?: Record<string, unknown>;
 }
 
 export class SecureShareError extends Error {
   code?: string;
   status?: number;
-  details?: any;
+  details?: Record<string, unknown>;
 
-  constructor(message: string, code?: string, status?: number, details?: any) {
+  constructor(message: string, code?: string, status?: number, details?: Record<string, unknown>) {
     super(message);
     this.name = 'SecureShareError';
     this.code = code;
@@ -61,7 +61,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   'FEATURE_DISABLED': 'This feature is currently disabled',
 };
 
-export function getErrorMessage(error: any): string {
+export function getErrorMessage(error: unknown): string {
   // If it's already a user-friendly message, return as-is
   if (typeof error === 'string') {
     return error;
@@ -72,24 +72,31 @@ export function getErrorMessage(error: any): string {
     return ERROR_MESSAGES[error.code] || error.message;
   }
 
-  // Check for API error responses
-  if (error?.response?.data?.error) {
-    return error.response.data.error;
+  // Type guard for API error responses
+  if (error && typeof error === 'object' && 'response' in error) {
+    const apiError = error as { response?: { data?: { error?: string } } };
+    if (apiError.response?.data?.error) {
+      return apiError.response.data.error;
+    }
   }
 
-  // Check for fetch errors
-  if (error?.message?.includes('Failed to fetch')) {
-    return ERROR_MESSAGES.NETWORK_ERROR;
+  // Type guard for Error objects
+  if (error instanceof Error) {
+    // Check for fetch errors
+    if (error.message.includes('Failed to fetch')) {
+      return ERROR_MESSAGES.NETWORK_ERROR;
+    }
+
+    // Check for timeout errors
+    if (error.name === 'AbortError' || error.message.includes('timeout')) {
+      return ERROR_MESSAGES.TIMEOUT;
+    }
   }
 
-  // Check for timeout errors
-  if (error?.name === 'AbortError' || error?.message?.includes('timeout')) {
-    return ERROR_MESSAGES.TIMEOUT;
-  }
-
-  // Check HTTP status codes
-  if (error?.status) {
-    switch (error.status) {
+  // Type guard for HTTP status errors
+  if (error && typeof error === 'object' && 'status' in error) {
+    const statusError = error as { status: number };
+    switch (statusError.status) {
       case 401:
         return ERROR_MESSAGES.UNAUTHORIZED;
       case 403:
@@ -110,14 +117,18 @@ export function getErrorMessage(error: any): string {
   }
 
   // Fallback to the error message or unknown error
-  return error?.message || ERROR_MESSAGES.UNKNOWN_ERROR;
+  if (error instanceof Error) {
+    return error.message;
+  }
+  
+  return ERROR_MESSAGES.UNKNOWN_ERROR;
 }
 
 export function createError(
   message: string, 
   code?: string, 
   status?: number, 
-  details?: any
+  details?: Record<string, unknown>
 ): SecureShareError {
   return new SecureShareError(message, code, status, details);
 }
@@ -160,7 +171,7 @@ export async function withRetry<T>(
   maxRetries: number = 3,
   delay: number = 1000
 ): Promise<T> {
-  let lastError: any;
+  let lastError: unknown;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {

@@ -15,7 +15,10 @@ export type JobType =
   | 'cdn-purge'
   | 'database-maintenance'
   | 'thumbnail-generation'
-  | 'virus-scan';
+  | 'virus-scan'
+  | 'file-processing'
+  | 'cache-maintenance'
+  | 'storage-maintenance';
 
 // Job status
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'retrying';
@@ -27,7 +30,7 @@ export type JobPriority = 'low' | 'normal' | 'high' | 'critical';
 export interface Job {
   id: string;
   type: JobType;
-  data: any;
+  data: Record<string, unknown>;
   priority: JobPriority;
   status: JobStatus;
   attempts: number;
@@ -37,9 +40,9 @@ export interface Job {
   scheduledAt?: Date;
   completedAt?: Date;
   error?: string;
-  result?: any;
+  result?: Record<string, unknown>;
   progress?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 // Job queue configuration
@@ -63,7 +66,7 @@ export interface QueueMetrics {
 }
 
 // Job processor function
-export type JobProcessor = (job: Job) => Promise<any>;
+export type JobProcessor = (job: Job) => Promise<Record<string, unknown> | undefined>;
 
 /**
  * In-memory job queue with persistence fallback
@@ -121,18 +124,17 @@ export class JobQueue extends EventEmitter {
   registerProcessor(jobType: JobType, processor: JobProcessor): void {
     this.processors.set(jobType, processor);
   }
-
   /**
    * Add a job to the queue
    */
   async addJob(
     type: JobType,
-    data: any,
+    data: Record<string, unknown>,
     options: {
       priority?: JobPriority;
       delay?: number;
       maxAttempts?: number;
-      metadata?: Record<string, any>;
+      metadata?: Record<string, unknown>;
     } = {}
   ): Promise<string> {
     const jobId = this.generateJobId();
@@ -180,6 +182,13 @@ export class JobQueue extends EventEmitter {
    */
   getJobsByType(type: JobType): Job[] {
     return Array.from(this.jobs.values()).filter(job => job.type === type);
+  }
+
+  /**
+   * Get all jobs
+   */
+  getAllJobs(): Job[] {
+    return Array.from(this.jobs.values());
   }
 
   /**

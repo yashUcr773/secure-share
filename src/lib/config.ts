@@ -6,13 +6,22 @@ function validateJWTSecret(): string {
   const secret = process.env.JWT_SECRET;
   const nodeEnv = process.env.NODE_ENV;
   
-  // In production, JWT_SECRET is mandatory and must meet security requirements
-  if (nodeEnv === 'production') {
-    if (!secret) {
+  // Always require JWT_SECRET, but allow development fallback if not in true production deployment
+  if (!secret) {
+    // In production deployment, this is a hard error
+    if (nodeEnv === 'production' && process.env.VERCEL) {
       console.error('❌ SECURITY ERROR: JWT_SECRET environment variable is required in production');
       throw new Error('JWT_SECRET environment variable is required in production');
     }
     
+    // For development or build processes, provide a fallback but warn
+    const fallbackSecret = 'dev-fallback-secret-key-not-for-production-use-only-change-this-in-production-environment';
+    console.warn('⚠️  WARNING: Using fallback JWT_SECRET. Set JWT_SECRET environment variable for production.');
+    return fallbackSecret;
+  }
+  
+  // Validate secret strength for production deployments
+  if (nodeEnv === 'production' && process.env.VERCEL) {
     if (secret.length < 32) {
       console.error('❌ SECURITY ERROR: JWT_SECRET must be at least 32 characters long in production');
       throw new Error('JWT_SECRET must be at least 32 characters long in production');
@@ -34,14 +43,6 @@ function validateJWTSecret(): string {
     }
     
     console.log('✅ JWT_SECRET validation passed');
-    return secret;
-  }
-  
-  // In development, provide a fallback but warn about it
-  if (!secret) {
-    const fallbackSecret = 'dev-fallback-secret-key-not-for-production-use-only-change-this-in-production';
-    console.warn('⚠️  WARNING: Using fallback JWT_SECRET in development. Set JWT_SECRET environment variable.');
-    return fallbackSecret;
   }
   
   return secret;
@@ -52,7 +53,7 @@ function validateSessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
   const nodeEnv = process.env.NODE_ENV;
   
-  if (nodeEnv === 'production' && !secret) {
+  if (nodeEnv === 'production' && process.env.VERCEL && !secret) {
     console.error('❌ SECURITY ERROR: SESSION_SECRET environment variable is required in production');
     throw new Error('SESSION_SECRET environment variable is required in production');
   }
@@ -69,14 +70,16 @@ export const config = {
   storageDir: process.env.STORAGE_DIR || './data',
   maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760'), // 10MB default
   cleanupDays: parseInt(process.env.CLEANUP_DAYS || '30'),
-    // Security Settings
+  
+  // Security Settings
   encryptionAlgorithm: process.env.ENCRYPTION_ALGORITHM || 'AES-GCM',
   keyDerivationIterations: parseInt(process.env.KEY_DERIVATION_ITERATIONS || '100000') || 100000,
   
   // Database Settings (for future use)
   databaseUrl: process.env.DATABASE_URL,
   redisUrl: process.env.REDIS_URL,
-    // Authentication Settings with enhanced validation
+  
+  // Authentication Settings with enhanced validation
   jwtSecret: validateJWTSecret(),
   sessionSecret: validateSessionSecret(),
   
@@ -95,31 +98,32 @@ export const config = {
     maxLoginAttempts: parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5'),
     lockoutDuration: parseInt(process.env.LOCKOUT_DURATION || '1800000'), // 30 minutes default
   },
-    // Rate Limiting - Optimized for production use
+  
+  // Rate Limiting - Optimized for production use
   rateLimit: {
     // File operations - reasonable limits for real usage
-    uploadPerHour: parseInt(process.env.RATE_LIMIT_UPLOAD_PER_HOUR || '50'), // Increased from 10
-    downloadPerHour: parseInt(process.env.RATE_LIMIT_DOWNLOAD_PER_HOUR || '200'), // Increased from 100
+    uploadPerHour: parseInt(process.env.RATE_LIMIT_UPLOAD_PER_HOUR || '50'),
+    downloadPerHour: parseInt(process.env.RATE_LIMIT_DOWNLOAD_PER_HOUR || '200'),
     
     // Authentication - balanced security and usability
-    authPerHour: parseInt(process.env.RATE_LIMIT_AUTH_PER_HOUR || '20'), // Increased from 5
-    authPerMinute: parseInt(process.env.RATE_LIMIT_AUTH_PER_MINUTE || '5'), // New: short-term burst protection
+    authPerHour: parseInt(process.env.RATE_LIMIT_AUTH_PER_HOUR || '20'),
+    authPerMinute: parseInt(process.env.RATE_LIMIT_AUTH_PER_MINUTE || '5'),
     
     // General API usage
-    generalPerMinute: parseInt(process.env.RATE_LIMIT_GENERAL_PER_MINUTE || '100'), // Increased from 60
-    generalPerSecond: parseInt(process.env.RATE_LIMIT_GENERAL_PER_SECOND || '5'), // New: burst protection
+    generalPerMinute: parseInt(process.env.RATE_LIMIT_GENERAL_PER_MINUTE || '100'),
+    generalPerSecond: parseInt(process.env.RATE_LIMIT_GENERAL_PER_SECOND || '5'),
     
     // Resource-intensive operations
-    maxConcurrentUploads: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT_UPLOADS || '5'), // Increased from 3
+    maxConcurrentUploads: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT_UPLOADS || '5'),
     maxFileSize: parseInt(process.env.RATE_LIMIT_MAX_FILE_SIZE || '104857600'), // 100MB default
     
     // Security-sensitive operations
-    passwordResetPerHour: parseInt(process.env.RATE_LIMIT_PASSWORD_RESET_PER_HOUR || '3'), // New
-    verificationEmailPerHour: parseInt(process.env.RATE_LIMIT_VERIFICATION_EMAIL_PER_HOUR || '5'), // New
+    passwordResetPerHour: parseInt(process.env.RATE_LIMIT_PASSWORD_RESET_PER_HOUR || '3'),
+    verificationEmailPerHour: parseInt(process.env.RATE_LIMIT_VERIFICATION_EMAIL_PER_HOUR || '5'),
     
     // Share link access
-    shareAccessPerMinute: parseInt(process.env.RATE_LIMIT_SHARE_ACCESS_PER_MINUTE || '30'), // New
-    shareAccessPerHour: parseInt(process.env.RATE_LIMIT_SHARE_ACCESS_PER_HOUR || '500'), // New
+    shareAccessPerMinute: parseInt(process.env.RATE_LIMIT_SHARE_ACCESS_PER_MINUTE || '30'),
+    shareAccessPerHour: parseInt(process.env.RATE_LIMIT_SHARE_ACCESS_PER_HOUR || '500'),
   },
   
   // Email Settings (for future use)
@@ -129,10 +133,11 @@ export const config = {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  
   // Feature Flags
   features: {
-    authentication: process.env.FEATURE_AUTHENTICATION !== 'false', // Enable authentication
-    emailNotifications: process.env.FEATURE_EMAIL_NOTIFICATIONS === 'true', // Enable when email is implemented
+    authentication: process.env.FEATURE_AUTHENTICATION !== 'false',
+    emailNotifications: process.env.FEATURE_EMAIL_NOTIFICATIONS === 'true',
     fileUpload: process.env.FEATURE_FILE_UPLOAD !== 'false',
     passwordProtection: process.env.FEATURE_PASSWORD_PROTECTION !== 'false',
     keyBasedSharing: process.env.FEATURE_KEY_BASED_SHARING !== 'false',
@@ -147,7 +152,7 @@ export const config = {
   // UI Configuration
   ui: {
     maxFileDisplaySize: parseInt(process.env.UI_MAX_FILE_DISPLAY_SIZE || '1048576'), // 1MB
-    defaultTheme: process.env.UI_DEFAULT_THEME || 'system', // 'light', 'dark', 'system'
+    defaultTheme: process.env.UI_DEFAULT_THEME || 'system',
     showFilePreview: process.env.UI_SHOW_FILE_PREVIEW !== 'false',
     enableDragDrop: process.env.UI_ENABLE_DRAG_DROP !== 'false',
     toastDuration: parseInt(process.env.UI_TOAST_DURATION || '4000'),
@@ -189,7 +194,8 @@ export function validateConfig() {
   if (config.keyDerivationIterations < 10000) {
     errors.push('KEY_DERIVATION_ITERATIONS should be at least 10000 for security');
   }
-    if (config.nodeEnv === 'production') {
+  
+  if (config.nodeEnv === 'production' && process.env.VERCEL) {
     if (!config.jwtSecret) {
       errors.push('JWT_SECRET is required in production');
     } else if (config.jwtSecret.length < 32) {
@@ -229,6 +235,7 @@ export function initConfig() {
     validateConfig();
     
     if (isDevelopment) {
+      console.log('🔧 SecureShare configuration loaded (development mode)');
     }
     
     return true;

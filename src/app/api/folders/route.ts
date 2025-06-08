@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
+import { Folder } from '@/generated/prisma';
 import { FolderService, RateLimitService } from '@/lib/database';
 import { AuthService } from '@/lib/auth-enhanced';
-import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
 import { CacheService } from '@/lib/cache';
 import { CompressionService } from '@/lib/compression';
 import { CDNService } from '@/lib/cdn';
@@ -13,12 +13,6 @@ export async function OPTIONS(request: NextRequest) {
   const response = handleCORSPreflight(request);
   return response ? addSecurityHeaders(response) : new NextResponse(null, { status: 405 });
 }
-
-// Validation schema for folder creation
-const createFolderSchema = z.object({
-  name: z.string().min(1, 'Folder name is required').max(255, 'Folder name too long'),
-  parentId: z.string().nullable().optional(),
-});
 
 // GET - Get user's folders
 export async function GET(request: NextRequest) {
@@ -78,9 +72,8 @@ export async function GET(request: NextRequest) {
     // Try to get folders from cache
     const cacheKey = `folders:${userId}`;
     const cacheResult = await CacheService.get(cacheKey);
-    
-    if (cacheResult.hit && cacheResult.data) {
-      const cachedFolders = cacheResult.data as any[];
+      if (cacheResult.hit && cacheResult.data) {
+      const cachedFolders = cacheResult.data as Folder[];
       
       // Queue analytics job for cached view
       await jobQueue.addJob('analytics-processing', {

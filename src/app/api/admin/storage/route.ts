@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { FileStorage } from '@/lib/storage';
 import { EdgeAuthService } from '@/lib/auth-edge';
 import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
-import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
+import { addSecurityHeaders, validateOrigin, handleCORSPreflight } from '@/lib/security';
 import { CacheService } from '@/lib/cache';
 import { CompressionService } from '@/lib/compression';
 import { CDNService } from '@/lib/cdn';

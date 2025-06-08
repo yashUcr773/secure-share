@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -26,20 +26,12 @@ export default function VerifyEmailPage() {
   const token = searchParams.get('token');
   const isFromSignup = searchParams.get('signup') === 'true';
   const emailParam = searchParams.get('email');
-
   // Set email from URL parameter if coming from signup
   useEffect(() => {
     if (emailParam) {
       setEmail(decodeURIComponent(emailParam));
     }
   }, [emailParam]);
-
-  // Auto-verify if token is provided in URL
-  useEffect(() => {
-    if (token) {
-      verifyEmailWithToken(token);
-    }
-  }, [token]);
 
   // Resend cooldown timer
   useEffect(() => {
@@ -52,8 +44,7 @@ export default function VerifyEmailPage() {
       setCanResend(true);
     }
   }, [resendCooldown]);
-
-  const verifyEmailWithToken = async (verificationToken: string) => {
+  const verifyEmailWithToken = useCallback(async (verificationToken: string) => {
     setIsVerifying(true);
     setError("");
 
@@ -82,11 +73,17 @@ export default function VerifyEmailPage() {
     } catch (err) {
       console.error("Email verification error:", err);
       setVerificationStatus('error');
-      setError("An unexpected error occurred");
-    } finally {
+      setError("An unexpected error occurred");    } finally {
       setIsVerifying(false);
     }
-  };
+  }, [csrfFetch, router]);
+
+  // Auto-verify if token is provided in URL
+  useEffect(() => {
+    if (token) {
+      verifyEmailWithToken(token);
+    }
+  }, [token, verifyEmailWithToken]);
 
   const handleManualVerification = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,9 +160,8 @@ export default function VerifyEmailPage() {
             {verificationStatus === 'expired' ? 'Verification Link Expired' : 'Verification Failed'}
           </h3>
           <p className="text-red-600">{error}</p>
-          {verificationStatus === 'expired' && (
-            <p className="text-muted-foreground">
-              Don't worry! You can request a new verification email below.
+          {verificationStatus === 'expired' && (            <p className="text-muted-foreground">
+              Don&apos;t worry! You can request a new verification email below.
             </p>
           )}
         </div>
@@ -202,9 +198,8 @@ export default function VerifyEmailPage() {
                 <div className="flex items-center gap-2 mb-2">
                   <CheckCircle className="h-4 w-4 text-green-600" />
                   <span className="font-medium text-green-800">Account Created Successfully!</span>
-                </div>
-                <p className="text-sm text-green-700 mb-2">
-                  Your account has been created. We've sent a verification email to:
+                </div>                <p className="text-sm text-green-700 mb-2">
+                  Your account has been created. We&apos;ve sent a verification email to:
                 </p>
                 <p className="text-sm font-medium text-green-800">{email}</p>
                 <p className="text-sm text-green-700 mt-2">

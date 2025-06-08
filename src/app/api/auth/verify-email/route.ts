@@ -3,17 +3,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '@/lib/auth-enhanced';
-import { addSecurityHeaders } from '@/lib/security';
+import { addSecurityHeaders, getClientIP } from '@/lib/security';
 import { RateLimitService } from '@/lib/database';
 import { sanitizeInput } from '@/lib/security';
 import { z } from 'zod';
-
-// Rate limiting - more restrictive for verification attempts
-const verificationRateLimit = {
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 attempts per window
-  message: 'Too many verification attempts'
-};
 
 // Validation schema
 const verificationSchema = z.object({
@@ -21,11 +14,10 @@ const verificationSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  try {
-    // Apply rate limiting using database service
+  try {    // Apply rate limiting using database service
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'email_verification',
-      request.ip || 'unknown',
+      getClientIP(request),
       5, // max attempts
       15 * 60 * 1000 // 15 minutes window
     );
@@ -106,12 +98,10 @@ export async function GET(request: NextRequest) {
         { error: 'Verification token is required' },
         { status: 400 }
       ));
-    }
-
-    // Apply rate limiting using database service
+    }    // Apply rate limiting using database service
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'email_verification_get',
-      request.ip || 'unknown',
+      getClientIP(request),
       5, // max attempts
       15 * 60 * 1000 // 15 minutes window
     );

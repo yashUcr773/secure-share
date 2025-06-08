@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuthService } from '@/lib/auth-enhanced';
-import { UserService } from '@/lib/database';
-import { generalRateLimit, createRateLimitIdentifier, checkRateLimit } from '@/lib/rate-limit';
-import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFWithSession } from '@/lib/security';
+import { UserService, RateLimitService } from '@/lib/database';
+import { addSecurityHeaders, validateOrigin, handleCORSPreflight, validateCSRFWithSession } from '@/lib/security';
+import { getClientIP } from '@/lib/rate-limit';
 import { CacheService } from '@/lib/cache';
 import { jobQueue } from '@/lib/job-queue';
 
@@ -22,20 +22,21 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // Rate limiting
-    const rateLimitId = createRateLimitIdentifier(request, 'notifications-update');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, rateLimitId);
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    // Apply rate limiting using database service
+    const clientIp = getClientIP(request);
+    const identifier = `auth_notifications_update:${clientIp}`;
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'notifications_update', 
+      10, 
+      60 * 60 * 1000 // 10 updates per hour
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many notification update attempts. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Origin validation for CSRF protection
@@ -118,13 +119,12 @@ export async function PUT(request: NextRequest) {
       // Invalidate user-related caches
       await CacheService.delete(`user:${verification.user.id}`);
       await CacheService.delete(`user_notifications:${verification.user.id}`);
-      
-      // Queue analytics job for notification settings change
+        // Queue analytics job for notification settings change
       await jobQueue.addJob('analytics-processing', {
         type: 'notification_settings_updated',
         userId: verification.user.id,
         settings: validation.data,
-        ip: createRateLimitIdentifier(request, 'notifications-update').split(':')[0],
+        ip: clientIp,
         userAgent: request.headers.get('user-agent') || 'unknown',
         timestamp: new Date().toISOString()
       });
@@ -157,20 +157,21 @@ export async function PUT(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Rate limiting
-    const rateLimitId = createRateLimitIdentifier(request, 'notifications-get');
-    const rateLimitResult = await checkRateLimit(request, generalRateLimit, rateLimitId);
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    // Apply rate limiting using database service
+    const clientIp = getClientIP(request);
+    const identifier = `auth_notifications_get:${clientIp}`;
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'notifications_get', 
+      100, 
+      60 * 60 * 1000 // 100 requests per hour
+    );
+    
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Origin validation for CSRF protection
@@ -210,12 +211,11 @@ export async function GET(request: NextRequest) {
       const cacheKey = `user_notifications:${currentUser.id}`;
       const cacheResult = await CacheService.get(cacheKey);
       
-      if (cacheResult.hit && cacheResult.data) {
-        // Queue analytics job for cached view
+      if (cacheResult.hit && cacheResult.data) {        // Queue analytics job for cached view
         await jobQueue.addJob('analytics-processing', {
           type: 'notification_settings_view',
           userId: currentUser.id,
-          ip: createRateLimitIdentifier(request, 'notifications-get').split(':')[0],
+          ip: clientIp,
           userAgent: request.headers.get('user-agent') || 'unknown',
           timestamp: new Date().toISOString(),
           cached: true
@@ -232,9 +232,8 @@ export async function GET(request: NextRequest) {
       // In a real application, you'd want a separate preferences table
       let userPreferences = null;
       try {
-        const nameData = currentUser.name ? JSON.parse(currentUser.name) : {};
-        userPreferences = nameData.notifications || null;
-      } catch (parseError) {
+        const nameData = currentUser.name ? JSON.parse(currentUser.name) : {};        userPreferences = nameData.notifications || null;
+      } catch {
         // If name field isn't valid JSON, treat as regular name and no preferences
         userPreferences = null;
       }
@@ -247,12 +246,11 @@ export async function GET(request: NextRequest) {
       
       // Cache the settings for 10 minutes
       await CacheService.set(cacheKey, settings, 600);
-      
-      // Queue analytics job
+        // Queue analytics job
       await jobQueue.addJob('analytics-processing', {
         type: 'notification_settings_view',
         userId: currentUser.id,
-        ip: createRateLimitIdentifier(request, 'notifications-get').split(':')[0],
+        ip: clientIp,
         userAgent: request.headers.get('user-agent') || 'unknown',
         timestamp: new Date().toISOString(),
         cached: false

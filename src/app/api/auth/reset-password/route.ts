@@ -3,16 +3,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '@/lib/auth-enhanced';
+import { RateLimitService } from '@/lib/database';
 import { addSecurityHeaders, sanitizeInput, validatePassword } from '@/lib/security';
-import { checkRateLimit, createRateLimitIdentifier } from '@/lib/rate-limit';
+import { getClientIP } from '@/lib/rate-limit';
 import { z } from 'zod';
-
-// Rate limiting - restrictive for reset attempts
-const resetRateLimit = {
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 attempts per window
-  message: 'Too many password reset attempts'
-};
 
 // Validation schema
 const resetPasswordSchema = z.object({
@@ -22,21 +16,21 @@ const resetPasswordSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    // Apply rate limiting
-    const identifier = createRateLimitIdentifier(request, 'reset_password');
-    const rateLimitResult = await checkRateLimit(request, resetRateLimit, identifier);
+    // Apply rate limiting using database
+    const clientIp = getClientIP(request);
+    const identifier = `reset_password:${clientIp}`;
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'reset_password', 
+      5, 
+      15 * 60 * 1000 // 5 attempts per 15 minutes
+    );
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many password reset attempts. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     const body = await request.json();
@@ -77,20 +71,13 @@ export async function POST(request: NextRequest) {
         { error: result.error || 'Password reset failed' },
         { status: 400 }
       ));
-    }
-
-    const response = NextResponse.json(
+    }    const response = NextResponse.json(
       { 
         success: true,
         message: 'Password reset successfully. You can now login with your new password.'
       },
       { status: 200 }
     );
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
 
     return addSecurityHeaders(response);
 
@@ -115,29 +102,25 @@ export async function GET(request: NextRequest) {
         { error: 'Reset token is required' },
         { status: 400 }
       ));
-    }
-
-    // Apply rate limiting for GET requests too
-    const identifier = createRateLimitIdentifier(request, 'reset_password_get');
-    const rateLimitResult = await checkRateLimit(request, resetRateLimit, identifier);
+    }    // Apply rate limiting for GET requests too
+    const clientIp = getClientIP(request);
+    const identifier = `reset_password_get:${clientIp}`;
+    const rateLimitResult = await RateLimitService.checkRateLimit(
+      identifier, 
+      'reset_password_get', 
+      5, 
+      15 * 60 * 1000 // 5 attempts per 15 minutes
+    );
     
-    if (!rateLimitResult.success) {
-      const response = NextResponse.json(
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(NextResponse.json(
         { error: 'Too many password reset attempts. Please try again later.' },
         { status: 429 }
-      );
-      
-      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      
-      return addSecurityHeaders(response);
+      ));
     }
 
     // Sanitize token
-    const sanitizedToken = sanitizeInput(token);
-
-    // Return token validation status (without actually resetting)
+    const sanitizedToken = sanitizeInput(token);    // Return token validation status (without actually resetting)
     // This allows frontend to validate the token before showing the reset form
     const response = NextResponse.json(
       { 
@@ -147,11 +130,6 @@ export async function GET(request: NextRequest) {
       },
       { status: 200 }
     );
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
 
     return addSecurityHeaders(response);
 

@@ -29,8 +29,7 @@ export function useEnhancedToast() {
       duration: 4000,
     });
   };
-
-  const showError = (error: any, title?: string) => {
+  const showError = (error: Error | string | unknown, title?: string) => {
     const errorMessage = getErrorMessage(error);
     showToast({
       title: title || "Error",
@@ -74,8 +73,7 @@ export function useEnhancedToast() {
       `${fileName} has been encrypted and is ready to share.`
     );
   };
-
-  const fileUploadError = (error: any, fileName?: string) => {
+  const fileUploadError = (error: Error | string | unknown, fileName?: string) => {
     showError(
       error,
       `Failed to upload ${fileName || 'file'}`

@@ -4,8 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '@/lib/auth-enhanced';
 import { addSecurityHeaders, sanitizeInput, validateEmail } from '@/lib/security';
-import { RateLimitService } from '@/lib/database';
-import { getClientIP } from '@/lib/rate-limit';
+import { createRateLimitIdentifier, checkRateLimit, passwordResetRateLimit } from '@/lib/rate-limit';
 import { z } from 'zod';
 
 // Validation schema
@@ -14,22 +13,19 @@ const forgotPasswordSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  try {
-    // Apply rate limiting using database - very restrictive for password reset requests
-    const clientIp = getClientIP(request);
-    const identifier = `forgot_password:${clientIp}`;
-    const rateLimitResult = await RateLimitService.checkRateLimit(
-      identifier, 
-      'password_reset', 
-      3, // 3 attempts
-      60 * 60 * 1000 // per hour
-    );
+  try {    // Apply rate limiting - very restrictive for password reset requests
+    const identifier = createRateLimitIdentifier(request, 'forgot_password');
+    const rateLimitResult = await checkRateLimit(request, passwordResetRateLimit, identifier);
     
-    if (!rateLimitResult.allowed) {
+    if (!rateLimitResult.success) {
       const response = NextResponse.json(
         { error: 'Too many password reset requests. Please try again later.' },
         { status: 429 }
       );
+      
+      Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
+        response.headers.set(key, value as string);
+      });
       
       return addSecurityHeaders(response);
     }
@@ -57,12 +53,9 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid email format' },
         { status: 400 }
       ));
-    }
-
-    // Initiate password reset
-    const result = await AuthService.initiatePasswordReset(email);
-    
-    // Always return success to prevent email enumeration
+    }    // Initiate password reset
+    await AuthService.initiatePasswordReset(email);
+      // Always return success to prevent email enumeration
     // Even if the email doesn't exist, we return success
     const response = NextResponse.json(
       { 
@@ -71,11 +64,6 @@ export async function POST(request: NextRequest) {
       },
       { status: 200 }
     );
-
-    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
 
     return addSecurityHeaders(response);
 

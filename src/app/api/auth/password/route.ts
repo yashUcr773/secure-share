@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuthService } from '@/lib/auth-enhanced';
-import { RateLimitService, UserService } from '@/lib/database';
-import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput, validateCSRFWithSession } from '@/lib/security';
+import { RateLimitService } from '@/lib/database';
+import { addSecurityHeaders, validateOrigin, handleCORSPreflight, sanitizeInput } from '@/lib/security';
 import { getClientIP } from '@/lib/rate-limit';
 
 // Validation schema for password change
@@ -102,15 +102,10 @@ export async function POST(request: NextRequest) {
         { error: updateResult.error || 'Failed to update password' },
         { status: 500 }
       ));
-    }
-
-    const response = NextResponse.json(
+    }    const response = NextResponse.json(
       { message: 'Password changed successfully' },
       { status: 200 }
-    );    // Add rate limit headers
-    Object.entries(rateLimitResult.headers).forEach(([key, value]) => {
-      response.headers.set(key, value as string);
-    });
+    );
 
     return addSecurityHeaders(response);
 

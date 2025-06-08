@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -23,33 +23,33 @@ export default function SharePage() {
   const [isPasswordRequired, setIsPasswordRequired] = useState(false);
   const [isDecrypted, setIsDecrypted] = useState(false);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    const fetchFileMetadata = async () => {
-      setIsLoading(true);
-      
-      try {
-        const response = await fetch(`/api/file/${params.id}`);
-        if (response.ok) {
-          const metadata = await response.json();
-          setFileName(metadata.fileName);
-          setIsPasswordRequired(metadata.isPasswordProtected);        } else {
-          showError("File not found or has expired", "Access Denied");
-          setError("File not found or expired");
-        }
-      } catch (err) {
-        console.error("Error fetching file metadata:", err);
-        showError(err, "Failed to Load File");
-        setError("Failed to load file");
-      } finally {
-        setIsLoading(false);
+  const [copied, setCopied] = useState(false);  const fetchFileMetadata = useCallback(async () => {
+    setIsLoading(true);
+    
+    try {
+      const response = await fetch(`/api/file/${params.id}`);
+      if (response.ok) {
+        const metadata = await response.json();
+        setFileName(metadata.fileName);
+        setIsPasswordRequired(metadata.isPasswordProtected);
+      } else {
+        showError("File not found or has expired", "Access Denied");
+        setError("File not found or expired");
       }
-    };
+    } catch (err) {
+      console.error("Error fetching file metadata:", err);
+      showError(err, "Failed to Load File");
+      setError("Failed to load file");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [params.id, showError]);
 
+  useEffect(() => {
     if (params.id) {
       fetchFileMetadata();
     }
-  }, [params.id]);  const handleDecrypt = async () => {
+  }, [params.id, fetchFileMetadata]);const handleDecrypt = async () => {
     if (isPasswordRequired && !password.trim()) {
       showWarning("Password Required", "Please enter the password to decrypt this file.");
       setError("Password is required");

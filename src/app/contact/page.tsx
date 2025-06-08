@@ -13,7 +13,7 @@ import { useEnhancedToast } from "@/hooks/useEnhancedToast";
 
 export default function ContactPage() {
   const { csrfFetch } = useCSRF();
-  const { showSuccess, showError, showInfo } = useEnhancedToast();
+  const { showSuccess, showError } = useEnhancedToast();
   const [formData, setFormData] = useState({
     name: "",
     email: "",
