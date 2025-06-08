@@ -39,7 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
+/e2e/test-results
 # SecureShare data storage (contains encrypted files)
 /data/
 

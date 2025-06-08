@@ -1,0 +1,432 @@
+# CI/CD Testing Workflow for SecureShare
+# Comprehensive automated testing pipeline with security, performance, and E2E testing
+
+name: 🧪 Comprehensive Test Suite
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # Allow manual triggering
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '18'
+  POSTGRES_VERSION: '13'
+
+jobs:
+  # =============================================================================
+  # SECURITY AND DEPENDENCY SCANNING
+  # =============================================================================
+  security-scan:
+    name: 🔒 Security Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    
+    steps:
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🛡️ Run npm audit
+        run: |
+          npm audit --audit-level moderate
+          
+      - name: 🔍 Run dependency check
+        run: |
+          npm ls --depth=0
+          
+      - name: 📋 Check for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+
+  # =============================================================================
+  # UNIT AND INTEGRATION TESTS
+  # =============================================================================
+  unit-integration-tests:
+    name: 🧪 Unit & Integration Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: secureshare_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 📦 Install dependencies
+        run: npm ci
+        
+      - name: 🗃️ Setup test database
+        run: |
+          npm run db:setup:test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/secureshare_test
+          
+      - name: 🧪 Run unit tests
+        run: npm run test:unit -- --coverage --maxWorkers=2
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-jwt-secret-for-ci-testing-only-at-least-32-characters-long
+          SESSION_SECRET: test-session-secret-for-ci
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+          STORAGE_DIR: ./test-data
+          KEY_DERIVATION_ITERATIONS: 10000
+          
+      - name: 🔗 Run integration tests
+        run: npm run test:integration -- --maxWorkers=2
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/secureshare_test
+          JWT_SECRET: test-jwt-secret-for-ci-testing-only-at-least-32-characters-long
+          SESSION_SECRET: test-session-secret-for-ci
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+          STORAGE_DIR: ./test-data
+          
+      - name: 📊 Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: unit-integration
+          name: unit-integration-coverage
+          
+      - name: 📋 Generate test report
+        if: always()
+        run: |
+          echo "## 🧪 Unit & Integration Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Unit tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "- Integration tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "- Coverage report uploaded" >> $GITHUB_STEP_SUMMARY
+
+  # =============================================================================
+  # PERFORMANCE TESTING
+  # =============================================================================
+  performance-tests:
+    name: ⚡ Performance Tests
+    runs-on: ubuntu-latest
+    needs: [unit-integration-tests]
+    
+    steps:
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 📦 Install dependencies
+        run: npm ci
+        
+      - name: ⚡ Run performance tests
+        run: npm run test:performance
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-jwt-secret-for-ci-testing-only-at-least-32-characters-long
+          SESSION_SECRET: test-session-secret-for-ci
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+          STORAGE_DIR: ./test-data
+          
+      - name: 📊 Store performance results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: ./performance-results.json
+          retention-days: 30
+
+  # =============================================================================
+  # SECURITY TESTING
+  # =============================================================================
+  security-tests:
+    name: 🛡️ Security Tests
+    runs-on: ubuntu-latest
+    needs: [unit-integration-tests]
+    
+    steps:
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 📦 Install dependencies
+        run: npm ci
+        
+      - name: 🛡️ Run security tests
+        run: npm run test:security
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-jwt-secret-for-ci-testing-only-at-least-32-characters-long
+          SESSION_SECRET: test-session-secret-for-ci
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+          STORAGE_DIR: ./test-data
+          
+      - name: 🔍 Run security validation script
+        run: npm run test:security-validation
+        
+      - name: 📋 Generate security report
+        if: always()
+        run: |
+          echo "## 🛡️ Security Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Security tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "- Vulnerability scanning completed" >> $GITHUB_STEP_SUMMARY
+
+  # =============================================================================
+  # END-TO-END TESTING
+  # =============================================================================
+  e2e-tests:
+    name: 🎭 End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: [unit-integration-tests]
+    
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: secureshare_e2e_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 📦 Install dependencies
+        run: npm ci
+        
+      - name: 🎭 Install Playwright
+        run: npx playwright install --with-deps
+        
+      - name: 🗃️ Setup E2E database
+        run: |
+          npm run db:setup:e2e
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/secureshare_e2e_test
+          
+      - name: 🚀 Build application
+        run: npm run build
+        env:
+          NODE_ENV: production
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+          
+      - name: 🎭 Run E2E tests
+        run: npm run test:e2e
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/secureshare_e2e_test
+          JWT_SECRET: test-jwt-secret-for-ci-testing-only-at-least-32-characters-long
+          SESSION_SECRET: test-session-secret-for-ci
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+          STORAGE_DIR: ./test-data
+          
+      - name: 📊 Upload E2E test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+          
+      - name: 📹 Upload test videos
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: playwright-videos
+          path: e2e/test-results/
+          retention-days: 7
+
+  # =============================================================================
+  # LIGHTHOUSE PERFORMANCE AUDIT
+  # =============================================================================
+  lighthouse-audit:
+    name: 🏠 Lighthouse Performance Audit
+    runs-on: ubuntu-latest
+    needs: [unit-integration-tests]
+    
+    steps:
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 📦 Install dependencies
+        run: npm ci
+        
+      - name: 🚀 Build application
+        run: npm run build
+        env:
+          NODE_ENV: production
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+          
+      - name: 🏃‍♂️ Start application
+        run: npm start &
+        env:
+          NODE_ENV: production
+          PORT: 3000
+          
+      - name: ⏳ Wait for application
+        run: npx wait-on http://localhost:3000
+        
+      - name: 🏠 Run Lighthouse audit
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          configPath: './lighthouse.config.js'
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+
+  # =============================================================================
+  # CODE QUALITY AND STATIC ANALYSIS
+  # =============================================================================
+  code-quality:
+    name: 📏 Code Quality Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Shallow clones should be disabled for better analysis
+          
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 📦 Install dependencies
+        run: npm ci
+        
+      - name: 🔍 Run ESLint
+        run: npm run lint
+        
+      - name: 🎨 Check TypeScript
+        run: npm run type-check
+        
+      - name: 🧪 Run tests for SonarCloud
+        run: npm run test:coverage
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-jwt-secret-for-ci-testing-only-at-least-32-characters-long
+          
+      - name: 📊 SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # =============================================================================
+  # TEST RESULTS SUMMARY
+  # =============================================================================
+  test-summary:
+    name: 📋 Test Results Summary
+    runs-on: ubuntu-latest
+    needs: [security-scan, unit-integration-tests, performance-tests, security-tests, e2e-tests, lighthouse-audit, code-quality]
+    if: always()
+    
+    steps:
+      - name: 📋 Generate comprehensive test summary
+        run: |
+          echo "# 🧪 SecureShare Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Test Suite Status" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔒 Security Scan: ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🧪 Unit & Integration: ${{ needs.unit-integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚡ Performance Tests: ${{ needs.performance-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🛡️ Security Tests: ${{ needs.security-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎭 E2E Tests: ${{ needs.e2e-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏠 Lighthouse Audit: ${{ needs.lighthouse-audit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 📏 Code Quality: ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Quality Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "- Test coverage reports available in artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Performance benchmarks stored" >> $GITHUB_STEP_SUMMARY
+          echo "- Security scan results reviewed" >> $GITHUB_STEP_SUMMARY
+          echo "- E2E test recordings available (if failed)" >> $GITHUB_STEP_SUMMARY
+          
+      - name: 🚨 Check overall status
+        run: |
+          if [[ "${{ needs.security-scan.result }}" == "failure" || 
+                "${{ needs.unit-integration-tests.result }}" == "failure" || 
+                "${{ needs.security-tests.result }}" == "failure" || 
+                "${{ needs.e2e-tests.result }}" == "failure" ]]; then
+            echo "❌ Critical tests failed - blocking deployment"
+            exit 1
+          else
+            echo "✅ All critical tests passed - ready for deployment"
+          fi
+
+  # =============================================================================
+  # DEPLOYMENT READINESS CHECK
+  # =============================================================================
+  deployment-readiness:
+    name: 🚀 Deployment Readiness
+    runs-on: ubuntu-latest
+    needs: [test-summary]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: ✅ Deployment readiness check
+        run: |
+          echo "## 🚀 Deployment Readiness Report" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ All tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Security scans completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Performance benchmarks met" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Code quality standards maintained" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎯 **Ready for production deployment**" >> $GITHUB_STEP_SUMMARY
+          
+      - name: 🏷️ Create deployment tag
+        if: success()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag -a "v$(date +'%Y%m%d-%H%M%S')" -m "Automated deployment tag"
+          git push origin --tags

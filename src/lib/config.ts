@@ -10,12 +10,12 @@ function validateJWTSecret(): string {
   if (nodeEnv === 'production') {
     if (!secret) {
       console.error('❌ SECURITY ERROR: JWT_SECRET environment variable is required in production');
-      process.exit(1);
+      throw new Error('JWT_SECRET environment variable is required in production');
     }
     
     if (secret.length < 32) {
       console.error('❌ SECURITY ERROR: JWT_SECRET must be at least 32 characters long in production');
-      process.exit(1);
+      throw new Error('JWT_SECRET must be at least 32 characters long in production');
     }
     
     // Check for common weak secrets
@@ -30,7 +30,7 @@ function validateJWTSecret(): string {
     
     if (weakSecrets.includes(secret.toLowerCase())) {
       console.error('❌ SECURITY ERROR: JWT_SECRET appears to be a default/weak value. Use a strong, random secret in production');
-      process.exit(1);
+      throw new Error('JWT_SECRET appears to be a default/weak value. Use a strong, random secret in production');
     }
     
     console.log('✅ JWT_SECRET validation passed');
@@ -54,7 +54,7 @@ function validateSessionSecret(): string {
   
   if (nodeEnv === 'production' && !secret) {
     console.error('❌ SECURITY ERROR: SESSION_SECRET environment variable is required in production');
-    process.exit(1);
+    throw new Error('SESSION_SECRET environment variable is required in production');
   }
   
   return secret || 'dev-session-secret-change-in-production';
