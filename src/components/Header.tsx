@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Shield, LogOut, User, Settings } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -23,10 +24,11 @@ export function Header() {
         <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
           <Shield className="h-6 w-6 text-primary" />
           <span className="text-xl font-bold">SecureShare</span>
-        </Link>
-
-        {/* Navigation */}
+        </Link>        {/* Navigation */}
         <div className="flex items-center gap-4">
+          {/* Theme Toggle - Always visible */}
+          <ThemeToggle />
+          
           {loading ? (
             <div className="w-20 h-9 bg-muted animate-pulse rounded"></div>
           ) : user ? (
