@@ -233,8 +233,7 @@ export class AuthService {
 
   /**
    * Verify and decode a JWT token
-   */
-  static async verifyToken(token: string): Promise<TokenVerificationResult> {
+   */  static async verifyToken(token: string): Promise<TokenVerificationResult> {
     try {
       if (!config.jwtSecret) {
         return { valid: false, error: 'JWT secret not configured' };
@@ -242,23 +241,56 @@ export class AuthService {
 
       console.log('🔧 [AUTH DEBUG] Verifying token...');
 
-      const payload = jwt.verify(token, config.jwtSecret, {
-        issuer: this.ISSUER,
-        audience: this.AUDIENCE,
-        algorithms: ['HS256'],
-      }) as JWTPayload;
-
-      console.log('🔧 [AUTH DEBUG] Token payload:', payload);
-      console.log('🔧 [AUTH DEBUG] Looking for session with token:', payload.sessionId);      // Verify session is still valid
-      const session = await SessionService.getValidSession(payload.sessionId);
+      // First, try to decode the token to check if it has issuer/audience claims
+      let payload: JWTPayload;
       
-      if (!session) {
-        console.log('❌ [AUTH DEBUG] Session not found or expired for sessionId:', payload.sessionId);
-        console.log('🔧 [AUTH DEBUG] Current time:', new Date());
-        return { valid: false, error: 'Session invalid or expired' };
+      try {
+        // Try verification with issuer/audience check (for new tokens)
+        payload = jwt.verify(token, config.jwtSecret, {
+          issuer: this.ISSUER,
+          audience: this.AUDIENCE,
+          algorithms: ['HS256'],
+        }) as JWTPayload;
+      } catch (audienceError) {
+        console.log("🚀 ~ AuthService ~ */verifyToken ~ audienceError:", audienceError)
+        console.log('🔧 [AUTH DEBUG] Token verification failed with audience check, trying without...');
+        
+        // If that fails, try without issuer/audience check (for legacy tokens)
+        try {
+          payload = jwt.verify(token, config.jwtSecret, {
+            algorithms: ['HS256'],
+          }) as JWTPayload;
+          
+          // Log that we're using a legacy token
+          console.log('🔧 [AUTH DEBUG] Successfully verified legacy token without audience check');
+        } catch (legacyError) {
+          console.error('❌ [AUTH DEBUG] Token verification failed completely:', legacyError);
+          return { 
+            valid: false, 
+            error: legacyError instanceof Error ? legacyError.message : 'Token verification failed'
+          };
+        }
       }
 
-      console.log('✅ [AUTH DEBUG] Session found:', session);
+      console.log('🔧 [AUTH DEBUG] Token payload:', payload);
+      
+      // Handle legacy tokens that might not have sessionId
+      if (payload.sessionId) {
+        console.log('🔧 [AUTH DEBUG] Looking for session with token:', payload.sessionId);
+        
+        // Verify session is still valid
+        const session = await SessionService.getValidSession(payload.sessionId);
+        
+        if (!session) {
+          console.log('❌ [AUTH DEBUG] Session not found or expired for sessionId:', payload.sessionId);
+          console.log('🔧 [AUTH DEBUG] Current time:', new Date());
+          return { valid: false, error: 'Session invalid or expired' };
+        }
+
+        console.log('✅ [AUTH DEBUG] Session found:', session);
+      } else {
+        console.log('🔧 [AUTH DEBUG] Legacy token without sessionId, skipping session check');
+      }
 
       // Get user data
       const user = await UserService.getUserById(payload.userId);
@@ -792,11 +824,11 @@ export class AuthService {
       return { user: null, error: 'Authentication failed' };
     }
   }
-
   /**
    * Determine user role based on user data
    * Since the database doesn't have a role field, we use business logic to determine roles
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private static determineUserRole(user: User): 'user' | 'admin' {
     // For now, we'll use a simple logic - this can be extended later
     // Option 1: Check if user is active (current pattern in codebase)
@@ -824,16 +856,19 @@ export class LegacyAuthService {
    */
   static async generateToken(user: { id: string; email: string }): Promise<string> {
     console.warn('LegacyAuthService.generateToken is deprecated. Use AuthService.generateTokens instead.');
-    
-    if (config.jwtSecret) {
+      if (config.jwtSecret) {
       // Use proper JWT if secret is available
       const payload = {
         userId: user.id,
         email: user.email,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
+        iss: 'secure-share', // Add issuer for consistency
+        aud: 'secure-share-users', // Add audience for consistency
       };
-      return jwt.sign(payload, config.jwtSecret);
+      return jwt.sign(payload, config.jwtSecret, {
+        algorithm: 'HS256',
+      });
     } else {
       // Fallback to base64 for development
       const payload = {

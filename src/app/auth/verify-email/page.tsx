@@ -89,12 +89,13 @@ function VerifyEmailContent() {
     } finally {
       setIsVerifying(false);
     }
-  }, [csrfFetch, router, isVerifying]);// Auto-verify if token is provided in URL, but wait for CSRF to be ready
+  }, [csrfFetch, router, isVerifying]);
+    // Auto-verify if token is provided in URL, but wait for CSRF to be ready
   useEffect(() => {
     if (token && !csrfLoading && !verificationAttemptedRef.current) {
       verifyEmailWithToken(token);
     }
-  }, [token, csrfLoading]);
+  }, [token, csrfLoading, verifyEmailWithToken]);
   const handleManualVerification = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);

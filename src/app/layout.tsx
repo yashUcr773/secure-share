@@ -21,8 +21,6 @@ export const viewport = {
   viewportFit: "cover"
 };
 
-export const themeColor = "#2563eb";
-
 export const metadata: Metadata = {
   title: "SecureShare - Secure File Sharing",
   description: "Upload, encrypt, and share your files with zero-knowledge security. Your data stays private with client-side encryption.",

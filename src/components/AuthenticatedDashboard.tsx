@@ -13,13 +13,19 @@ export default function AuthenticatedDashboard({ children }: AuthenticatedDashbo
   const { user, loading } = useAuth();
   const router = useRouter();
 
+  // Debug logging
+  console.log("🔐 AuthenticatedDashboard - loading:", loading, "user:", !!user);
+
   useEffect(() => {
+    console.log("🔐 AuthenticatedDashboard useEffect - loading:", loading, "user:", !!user);
     if (!loading && !user) {
+      console.log("🔐 Redirecting to login...");
       router.push('/auth/login');
     }
   }, [user, loading, router]);
 
   if (loading) {
+    console.log("🔐 Showing loading state");
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -28,6 +34,7 @@ export default function AuthenticatedDashboard({ children }: AuthenticatedDashbo
   }
 
   if (!user) {
+    console.log("🔐 Showing access denied");
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
@@ -38,5 +45,6 @@ export default function AuthenticatedDashboard({ children }: AuthenticatedDashbo
     );
   }
 
+  console.log("🔐 Rendering children");
   return <>{children}</>;
 }

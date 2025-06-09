@@ -459,18 +459,40 @@ export class SharedLinkService {
         createdAt: 'desc',
       },
     });
-  }
-
-  static async updateAnalytics(fileId: string, type: 'view' | 'download'): Promise<void> {
-    await prisma.sharedLink.update({
-      where: { fileId },
-      data: {
-        [type === 'view' ? 'views' : 'downloads']: {
-          increment: 1,
-        },
+  }  static async updateAnalytics(fileId: string, type: 'view' | 'download'): Promise<void> {
+    try {
+      // Get the file to check if it exists and has a userId
+      const file = await FileService.getFile(fileId);
+      if (!file) {
+        console.warn(`File ${fileId} not found, skipping analytics update`);
+        return;
       }
-    });
-}   
+
+      // Skip analytics for anonymous files since SharedLink requires userId
+      if (!file.userId) {
+        console.log(`Skipping analytics for anonymous file ${fileId}`);
+        return;
+      }
+
+      // Use upsert to create shared link if it doesn't exist, or update if it does
+      await prisma.sharedLink.upsert({
+        where: { fileId },
+        update: {
+          [type === 'view' ? 'views' : 'downloads']: {
+            increment: 1,
+          },
+        },
+        create: {
+          fileId,
+          userId: file.userId,
+          [type === 'view' ? 'views' : 'downloads']: 1,
+        }
+      });
+    } catch (error) {
+      console.error(`Failed to update analytics for file ${fileId}:`, error);
+      // Don't throw the error - analytics should not break file access
+    }
+}
 
   static async toggleSharedLink(fileId: string, isActive: boolean): Promise<SharedLink> {
     return prisma.sharedLink.update({
@@ -503,8 +525,8 @@ export class SharedLinkService {
 }
 
 // Rate limiting service
-export class RateLimitService {
-  static async checkRateLimit(
+export class RateLimitService {  
+    static async checkRateLimit(
     identifier: string,
     action: string,
     limit: number,
@@ -524,42 +546,53 @@ export class RateLimitService {
       },
     });
 
-    // Get or create rate limit entry
-    const existing = await prisma.rateLimitEntry.findFirst({
-      where: {
-        identifier,
-        action,
-        windowStart: {
-          gte: windowStart,
-        },
-      },
-    });
-
-    if (existing) {
-      if (existing.count >= limit) {
-        return {
-          allowed: false,
-          remaining: 0,
-          resetTime: existing.expiresAt,
-        };
-      }
-
-      const updated = await prisma.rateLimitEntry.update({
-        where: { id: existing.id },
-        data: {
-          count: {
-            increment: 1,
+    try {
+      // Use a more atomic approach with upsert to avoid race conditions
+      // First, try to find an existing valid entry
+      const existing = await prisma.rateLimitEntry.findFirst({
+        where: {
+          identifier,
+          action,
+          windowStart: {
+            gte: windowStart,
           },
         },
       });
 
-      return {
-        allowed: true,
-        remaining: limit - updated.count,
-        resetTime: updated.expiresAt,
-      };
-    } else {
-      await prisma.rateLimitEntry.create({
+      if (existing) {
+        if (existing.count >= limit) {
+          return {
+            allowed: false,
+            remaining: 0,
+            resetTime: existing.expiresAt,
+          };
+        }
+
+        // Try to update, but handle the case where it might have been deleted
+        try {
+          const updated = await prisma.rateLimitEntry.update({
+            where: { id: existing.id },
+            data: {
+              count: {
+                increment: 1,
+              },
+            },
+          });
+
+          return {
+            allowed: true,
+            remaining: limit - updated.count,
+            resetTime: updated.expiresAt,
+          };
+        } catch (updateError) {
+          console.log("🚀 ~ RateLimitService ~ updateError:", updateError)
+          // If update fails (record not found), fall through to create a new one
+          console.warn('Rate limit entry was deleted during update, creating new entry');
+        }
+      }
+
+      // Create new entry (either no existing entry found or update failed)
+      const newEntry = await prisma.rateLimitEntry.create({
         data: {
           identifier,
           action,
@@ -569,6 +602,14 @@ export class RateLimitService {
         },
       });
 
+      return {
+        allowed: true,
+        remaining: limit - 1,
+        resetTime: newEntry.expiresAt,
+      };
+    } catch (error) {
+      console.error('Rate limit check failed:', error);
+      // In case of any error, allow the request but log it
       return {
         allowed: true,
         remaining: limit - 1,

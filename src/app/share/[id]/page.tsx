@@ -45,13 +45,15 @@ export default function SharePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [params.id, showError]);
+  }, [params.id]); // Remove showError from dependencies
 
   useEffect(() => {
     if (params.id) {
       fetchFileMetadata();
     }
-  }, [params.id, fetchFileMetadata]);const handleDecrypt = async () => {
+  }, [params.id]); // Remove fetchFileMetadata from dependencies
+
+  const handleDecrypt = async () => {
     if (isPasswordRequired && !password.trim()) {
       showWarning("Password Required", "Please enter the password to decrypt this file.");
       setError("Password is required");
