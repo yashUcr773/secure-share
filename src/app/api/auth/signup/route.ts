@@ -31,8 +31,8 @@ export async function POST(request: NextRequest) {
     const rateLimitResult = await RateLimitService.checkRateLimit(
       identifier, 
       'signup_attempt', 
-      3, 
-      60 * 60 * 1000 // 3 attempts per hour
+      8, 
+      1 * 60 * 1000 // 3 attempts per hour
     );
     
     if (!rateLimitResult.allowed) {

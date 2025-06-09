@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -19,12 +19,12 @@ function VerifyEmailContent() {
   const [verificationStatus, setVerificationStatus] = useState<'pending' | 'success' | 'error' | 'expired'>('pending');
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [email, setEmail] = useState("");
-  const [canResend, setCanResend] = useState(true);
+  const [email, setEmail] = useState("");  const [canResend, setCanResend] = useState(true);
   const [resendCooldown, setResendCooldown] = useState(0);
-    const router = useRouter();
+  const verificationAttemptedRef = useRef(false);
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const { csrfFetch } = useCSRF();
+  const { csrfFetch, isLoading: csrfLoading } = useCSRF();
   const token = searchParams.get('token');
   const isFromSignup = searchParams.get('signup') === 'true';
   const emailParam = searchParams.get('email');
@@ -45,8 +45,14 @@ function VerifyEmailContent() {
     } else {
       setCanResend(true);
     }
-  }, [resendCooldown]);
+  }, [resendCooldown]);  
   const verifyEmailWithToken = useCallback(async (verificationToken: string) => {
+    // Prevent multiple calls using ref
+    if (isVerifying || verificationAttemptedRef.current) {
+      return;
+    }
+    
+    verificationAttemptedRef.current = true;
     setIsVerifying(true);
     setError("");
 
@@ -71,22 +77,24 @@ function VerifyEmailContent() {
           setVerificationStatus('expired');
         }
         setError(data.error || 'Email verification failed');
+        // Reset ref on error so user can retry
+        verificationAttemptedRef.current = false;
       }
     } catch (err) {
       console.error("Email verification error:", err);
       setVerificationStatus('error');
-      setError("An unexpected error occurred");    } finally {
+      setError("An unexpected error occurred");
+      // Reset ref on error so user can retry
+      verificationAttemptedRef.current = false;
+    } finally {
       setIsVerifying(false);
     }
-  }, [csrfFetch, router]);
-
-  // Auto-verify if token is provided in URL
+  }, [csrfFetch, router, isVerifying]);// Auto-verify if token is provided in URL, but wait for CSRF to be ready
   useEffect(() => {
-    if (token) {
+    if (token && !csrfLoading && !verificationAttemptedRef.current) {
       verifyEmailWithToken(token);
     }
-  }, [token, verifyEmailWithToken]);
-
+  }, [token, csrfLoading]);
   const handleManualVerification = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
@@ -97,6 +105,8 @@ function VerifyEmailContent() {
       return;
     }
 
+    // Reset ref for manual verification
+    verificationAttemptedRef.current = false;
     await verifyEmailWithToken(verificationToken);
   };
 
@@ -131,8 +141,17 @@ function VerifyEmailContent() {
       setIsResending(false);
     }
   };
-
   const renderVerificationStatus = () => {
+    if (csrfLoading) {
+      return (
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
+          <h3 className="text-lg font-semibold">Initializing...</h3>
+          <p className="text-muted-foreground">Preparing verification system...</p>
+        </div>
+      );
+    }
+
     if (isVerifying) {
       return (
         <div className="text-center space-y-4">

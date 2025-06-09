@@ -23,17 +23,39 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const { csrfFetch } = useCSRF();  // Check for existing auth session on mount
+  const { csrfFetch } = useCSRF();
+  // Check for existing auth session on mount, but skip on auth pages
   useEffect(() => {
-    checkAuthStatus();
+    // Skip auth check on authentication pages to prevent infinite redirects
+    if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname;
+      const isAuthPage = pathname.startsWith('/auth/');
+      
+      if (!isAuthPage) {
+        checkAuthStatus();
+      } else {
+        // On auth pages, just set loading to false without checking auth
+        setLoading(false);
+        
+        // Also clear any existing tokens if we're on login page with expired parameter
+        if (pathname === '/auth/login') {
+          const searchParams = new URLSearchParams(window.location.search);
+          if (searchParams.get('expired') === 'true') {
+            // Clear any existing auth cookies
+            document.cookie = 'auth-token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            document.cookie = 'refresh-token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+          }
+        }
+      }
+    }
   }, []);
-
   // Start token refresh timer when user becomes authenticated
   useEffect(() => {
     if (user) {
+      console.log('User authenticated, starting token refresh timer in 1 second');
       const timer = setTimeout(() => {
         startTokenRefreshTimer();
-      }, 100);
+      }, 1000); // Increased delay to ensure login is complete
       
       return () => clearTimeout(timer);
     }
@@ -54,9 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const login = async (email: string, password: string) => {
+  };  const login = async (email: string, password: string) => {
     try {
       const response = await csrfFetch('/api/auth/login', {
         method: 'POST',
@@ -67,6 +87,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (response.ok) {
         setUser(data.user);
+        
+        // Clear any expired session flags after successful login
+        if (typeof window !== 'undefined') {
+          // Clear the expired parameter from URL if present
+          const url = new URL(window.location.href);
+          if (url.searchParams.has('expired')) {
+            url.searchParams.delete('expired');
+            window.history.replaceState({}, '', url.pathname + url.search);
+          }
+        }
+        
+        // Add a small delay to ensure session is fully established
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         return { success: true };
       } else {
         return { success: false, error: data.error || 'Login failed' };

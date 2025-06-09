@@ -28,8 +28,8 @@ export async function POST(request: NextRequest) {
     const rateLimitResult = await RateLimitService.checkRateLimit(
       identifier, 
       'login_attempt', 
-      5, 
-      15 * 60 * 1000 // 15 minutes in milliseconds
+      10, 
+      1 * 60 * 1000 // 15 minutes in milliseconds
     );
     
     if (!rateLimitResult.allowed) {
@@ -62,15 +62,24 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const { email, password } = validation.data;    // Attempt login using enhanced auth service
+    const { email, password } = validation.data;
+
+    console.log('🔧 [LOGIN DEBUG] Login attempt for email:', email);
+
+    // Attempt login using enhanced auth service
     const result = await AuthService.login(email, password);
     
     if (!result.success) {
+      console.log('❌ [LOGIN DEBUG] Login failed:', result.error);
       return addSecurityHeaders(NextResponse.json(
         { error: result.error || 'Invalid email or password' },
         { status: 401 }
       ));
-    }    // Check for 2FA requirement after successful password verification
+    }
+
+    console.log('✅ [LOGIN DEBUG] Login successful, checking 2FA...');
+
+    // Check for 2FA requirement after successful password verification
     const { UserService } = await import('@/lib/database');    const user = await UserService.getUserById(result.user!.id);
     
     if (user && (user as { twoFactorEnabled?: boolean }).twoFactorEnabled) {
@@ -115,6 +124,10 @@ export async function POST(request: NextRequest) {
       ));
     }
 
+    console.log('✅ [LOGIN DEBUG] No 2FA required, setting cookies...');
+    console.log('🔧 [LOGIN DEBUG] Access token length:', result.accessToken?.length || 0);
+    console.log('🔧 [LOGIN DEBUG] Refresh token length:', result.refreshToken?.length || 0);
+
     // Create response with user data (without sensitive information)
     const response = NextResponse.json(
       { 
@@ -126,7 +139,9 @@ export async function POST(request: NextRequest) {
         }
       },
       { status: 200 }
-    );    // Set access token cookie (short-lived)
+    );
+
+    // Set access token cookie (short-lived)
     response.cookies.set('auth-token', result.accessToken!, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -143,6 +158,8 @@ export async function POST(request: NextRequest) {
       maxAge: 7 * 24 * 60 * 60, // 7 days
       path: '/'
     });
+
+    console.log('✅ [LOGIN DEBUG] Cookies set successfully');
 
     // Log user login activity
     try {

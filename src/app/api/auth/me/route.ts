@@ -45,22 +45,41 @@ export async function GET(request: NextRequest) {
 
     const token = request.cookies.get('auth-token')?.value;
     
+    console.log('🔧 [ME DEBUG] Checking authentication...');
+    console.log('🔧 [ME DEBUG] Token present:', !!token);
+    if (token) {
+      console.log('🔧 [ME DEBUG] Token length:', token.length);
+      console.log('🔧 [ME DEBUG] Token start:', token.substring(0, 20) + '...');
+    }
+    
     if (!token) {
+      console.log('❌ [ME DEBUG] No token found in cookies');
       return addSecurityHeaders(NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
       ));
     }
 
+    console.log('🔧 [ME DEBUG] Verifying token...');
+
     // Verify token using enhanced auth service
     const verificationResult = await AuthService.verifyToken(token);
     
+    console.log('🔧 [ME DEBUG] Verification result:', {
+      valid: verificationResult.valid,
+      error: verificationResult.error,
+      hasUser: !!verificationResult.user
+    });
+    
     if (!verificationResult.valid || !verificationResult.user) {
+      console.log('❌ [ME DEBUG] Token verification failed:', verificationResult.error);
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid token' },
         { status: 401 }
       ));
     }
+
+    console.log('✅ [ME DEBUG] Token verification successful');
 
     const user = verificationResult.user;    const response = NextResponse.json({
       user: { 

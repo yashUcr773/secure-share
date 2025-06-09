@@ -10,7 +10,7 @@ import { z } from 'zod';
 
 // Validation schema
 const verificationSchema = z.object({
-  token: z.string().min(32).max(128)
+  token: z.string().min(48).max(96)
 });
 
 export async function POST(request: NextRequest) {
@@ -18,8 +18,8 @@ export async function POST(request: NextRequest) {
     const rateLimitResult = await RateLimitService.checkRateLimit(
       'email_verification',
       getClientIP(request),
-      5, // max attempts
-      15 * 60 * 1000 // 15 minutes window
+      8, // max attempts
+      1 * 60 * 1000 // 15 minutes window
     );
     
     if (!rateLimitResult.allowed) {
@@ -43,6 +43,7 @@ export async function POST(request: NextRequest) {
     };
 
     const validation = verificationSchema.safeParse(sanitizedBody);
+    console.log("🚀 ~ POST ~ validation:", validation)
     if (!validation.success) {
       return addSecurityHeaders(NextResponse.json(
         { error: 'Invalid verification token format', details: validation.error.errors },

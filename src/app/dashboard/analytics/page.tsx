@@ -55,6 +55,7 @@ export default function AnalyticsPage() {
       }
       
       const data = await response.json();
+      console.log("🚀 ~ fetchAnalytics ~ data:", data)
       
       if (data.success) {
         setAnalytics(data.analytics);
@@ -165,42 +166,39 @@ export default function AnalyticsPage() {
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center gap-2">
-                <Eye className="h-5 w-5 text-blue-500" />
+                <Eye className="h-5 w-5 text-blue-500" />                
                 <div>
-                  <div className="text-2xl font-bold">{analytics.totalViews.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{(analytics.totalViews || 0)}</div>
                   <div className="text-sm text-muted-foreground">Total Views</div>
                 </div>
               </div>
             </CardContent>
-          </Card>
-          <Card>
+          </Card>          <Card>
             <CardContent className="p-6">
               <div className="flex items-center gap-2">
                 <Download className="h-5 w-5 text-green-500" />
                 <div>
-                  <div className="text-2xl font-bold">{analytics.totalDownloads.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{(analytics.totalDownloads || 0)}</div>
                   <div className="text-sm text-muted-foreground">Total Downloads</div>
                 </div>
               </div>
             </CardContent>
-          </Card>
-          <Card>
+          </Card>          <Card>
             <CardContent className="p-6">
               <div className="flex items-center gap-2">
                 <Share2 className="h-5 w-5 text-purple-500" />
                 <div>
-                  <div className="text-2xl font-bold">{analytics.totalShares.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{(analytics.totalShares || 0)}</div>
                   <div className="text-sm text-muted-foreground">Total Shares</div>
                 </div>
               </div>
             </CardContent>
-          </Card>
-          <Card>
+          </Card>          <Card>
             <CardContent className="p-6">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-orange-500" />
                 <div>
-                  <div className="text-2xl font-bold">{analytics.activeLinks}</div>
+                  <div className="text-2xl font-bold">{analytics.activeLinks || 0}</div>
                   <div className="text-sm text-muted-foreground">Active Links</div>
                 </div>
               </div>
@@ -216,10 +214,9 @@ export default function AnalyticsPage() {
               <CardDescription>
                 Your most viewed and downloaded files
               </CardDescription>
-            </CardHeader>
-            <CardContent>
+            </CardHeader>            <CardContent>
               <div className="space-y-4">
-                {analytics.popularFiles.map((file, index) => (
+                {(analytics.popularFiles || []).map((file, index) => (
                   <div key={file.id} className="flex items-center gap-4">
                     <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
                       <span className="text-sm font-semibold text-primary">{index + 1}</span>
@@ -254,10 +251,9 @@ export default function AnalyticsPage() {
               <CardDescription>
                 Latest interactions with your files
               </CardDescription>
-            </CardHeader>
-            <CardContent>
+            </CardHeader>            <CardContent>
               <div className="space-y-4">
-                {analytics.recentActivity.map((activity) => (
+                {(analytics.recentActivity || []).map((activity) => (
                   <div key={activity.id} className="flex items-center gap-4">
                     <div className="p-2 bg-secondary rounded-full">
                       {getActivityIcon(activity.type)}
@@ -292,10 +288,9 @@ export default function AnalyticsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-64">              <ResponsiveContainer width="100%" height="100%">
                 <LineChart
-                  data={analytics.viewsOverTime}
+                  data={analytics.viewsOverTime || []}
                   margin={{
                     top: 5,
                     right: 30,

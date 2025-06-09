@@ -66,28 +66,43 @@ class TokenRefreshService {
       };
     }
   }
-
   /**
    * Check if a response indicates an expired token
-   */  isTokenExpiredResponse(response: Response): boolean {
+   */
+  isTokenExpiredResponse(response: Response): boolean {
+    // Only consider it expired if we're not on an auth page
+    if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname;
+      if (pathname.startsWith('/auth/')) {
+        return false; // Don't trigger refresh on auth pages
+      }
+    }
+    
     return response.status === 401 && 
            (response.headers.get('content-type')?.includes('application/json') ?? false);
   }
 
   /**
    * Retry a failed request after refreshing the token
-   */
-  async retryWithRefresh(
+   */  async retryWithRefresh(
     originalRequest: () => Promise<Response>
   ): Promise<Response> {
     const refreshResult = await this.refreshToken();
     
     if (refreshResult.success) {
       // Retry the original request
-      return originalRequest();    } else {
-      // Refresh failed, redirect to login
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || window.location.origin;
-      window.location.href = `${baseUrl}/auth/login?expired=true`;
+      return originalRequest();
+    } else {
+      // Refresh failed, redirect to login only if not already on auth page
+      if (typeof window !== 'undefined') {
+        const pathname = window.location.pathname;
+        const isAuthPage = pathname.startsWith('/auth/');
+        
+        if (!isAuthPage) {
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || window.location.origin;
+          window.location.href = `${baseUrl}/auth/login?expired=true`;
+        }
+      }
       throw new Error('Session expired. Please log in again.');
     }
   }

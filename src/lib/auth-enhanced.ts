@@ -18,6 +18,7 @@ import type { User } from '../generated/prisma';
 export interface JWTPayload {
   userId: string;
   email: string;
+  role: 'user' | 'admin';
   sessionId: string;
   type: 'access' | 'refresh';
   iat: number;
@@ -53,8 +54,8 @@ export interface TokenVerificationResult {
 export class AuthService {
   private static readonly ACCESS_TOKEN_EXPIRES_IN = '15m';
   private static readonly REFRESH_TOKEN_EXPIRES_IN = '7d';
-  private static readonly ISSUER = 'secureshare';
-  private static readonly AUDIENCE = 'secureshare-users';
+  private static readonly ISSUER = 'secure-share';
+  private static readonly AUDIENCE = 'secure-share-users';
 
   /**
    * Hash a password using PBKDF2
@@ -175,10 +176,12 @@ export class AuthService {
     const sessionId = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
 
-    // Create access token (short-lived)
+    console.log('🔧 [AUTH DEBUG] Generating tokens for user:', user.id);
+    console.log('🔧 [AUTH DEBUG] Generated sessionId:', sessionId);    // Create access token (short-lived)
     const accessPayload: JWTPayload = {
       userId: user.id,
       email: user.email,
+      role: 'user', // Default role since User model doesn't have role field yet
       sessionId,
       type: 'access',
       iat: now,
@@ -191,6 +194,7 @@ export class AuthService {
     const refreshPayload: JWTPayload = {
       userId: user.id,
       email: user.email,
+      role: 'user', // Default role since User model doesn't have role field yet
       sessionId,
       type: 'refresh',
       iat: now,
@@ -207,12 +211,22 @@ export class AuthService {
       algorithm: 'HS256',
     });
 
+    console.log('🔧 [AUTH DEBUG] Access token payload:', accessPayload);
+    console.log('🔧 [AUTH DEBUG] Creating session with token:', sessionId);
+    console.log('🔧 [AUTH DEBUG] Session expiry:', new Date(refreshPayload.exp * 1000));
+
     // Store session in database
-    await SessionService.createSession({
-      userId: user.id,
-      token: sessionId,
-      expiresAt: new Date(refreshPayload.exp * 1000),
-    });
+    try {
+      const session = await SessionService.createSession({
+        userId: user.id,
+        token: sessionId,
+        expiresAt: new Date(refreshPayload.exp * 1000),
+      });
+      console.log('✅ [AUTH DEBUG] Session created successfully:', session);
+    } catch (error) {
+      console.error('❌ [AUTH DEBUG] Session creation failed:', error);
+      throw error;
+    }
 
     return { accessToken, refreshToken, sessionId };
   }
@@ -226,23 +240,34 @@ export class AuthService {
         return { valid: false, error: 'JWT secret not configured' };
       }
 
+      console.log('🔧 [AUTH DEBUG] Verifying token...');
+
       const payload = jwt.verify(token, config.jwtSecret, {
         issuer: this.ISSUER,
         audience: this.AUDIENCE,
         algorithms: ['HS256'],
       }) as JWTPayload;
 
-      // Verify session is still valid
+      console.log('🔧 [AUTH DEBUG] Token payload:', payload);
+      console.log('🔧 [AUTH DEBUG] Looking for session with token:', payload.sessionId);      // Verify session is still valid
       const session = await SessionService.getValidSession(payload.sessionId);
+      
       if (!session) {
+        console.log('❌ [AUTH DEBUG] Session not found or expired for sessionId:', payload.sessionId);
+        console.log('🔧 [AUTH DEBUG] Current time:', new Date());
         return { valid: false, error: 'Session invalid or expired' };
       }
+
+      console.log('✅ [AUTH DEBUG] Session found:', session);
 
       // Get user data
       const user = await UserService.getUserById(payload.userId);
       if (!user || !user.isActive) {
+        console.log('❌ [AUTH DEBUG] User not found or inactive:', payload.userId);
         return { valid: false, error: 'User not found or inactive' };
       }
+
+      console.log('✅ [AUTH DEBUG] Token verification successful');
 
       return {
         valid: true,
@@ -250,7 +275,7 @@ export class AuthService {
         user,
       };
     } catch (error) {
-      console.error('Token verification error:', error);
+      console.error('❌ [AUTH DEBUG] Token verification error:', error);
       return { 
         valid: false, 
         error: error instanceof Error ? error.message : 'Token verification failed' 
@@ -349,13 +374,16 @@ export class AuthService {
 
       if (verification.payload.type !== 'refresh') {
         return { error: 'Invalid token type' };
-      }
-
-      // Generate new access token
+      }      // Generate new access token
       const now = Math.floor(Date.now() / 1000);
+      
+      // Determine user role - defaulting to 'user', but could extend with admin logic
+      const userRole = AuthService.determineUserRole(verification.user);
+      
       const accessPayload: JWTPayload = {
         userId: verification.user.id,
         email: verification.user.email,
+        role: userRole,
         sessionId: verification.payload.sessionId,
         type: 'access',
         iat: now,
@@ -558,15 +586,35 @@ export class AuthService {
    * Generate password reset token
    */
   static generatePasswordResetToken(): string {
-    return Math.random().toString(36).substr(2, 32) + Date.now().toString(36);
+    return this.generateSecureToken(64);
   }
 
   /**
    * Generate email verification token
    */
   static generateEmailVerificationToken(): string {
-    return Math.random().toString(36).substr(2, 32) + Date.now().toString(36);
+    return this.generateSecureToken(64);
   }
+
+    static generateSecureToken(length: number = 64): string {
+        // Ensure length is within acceptable bounds
+        if (length < 48 || length > 96) {
+            throw new Error('Token length must be between 48 and 96 characters');
+        }
+
+        // Use Web Crypto API for cryptographically secure random bytes
+        const array = new Uint8Array(Math.ceil(length * 0.75)); // Base64 expansion factor
+        crypto.getRandomValues(array);
+
+        // Convert to base64url (URL-safe base64 without padding)
+        const base64 = btoa(String.fromCharCode(...array))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+
+        // Return exact length requested
+        return base64.substring(0, length);
+    }
 
   /**
    * Initiate password reset
@@ -698,6 +746,7 @@ export class AuthService {
     try {
       // Find user by verification token
       const user = await UserService.getUserByEmailVerificationToken(token);
+      console.log("🚀 ~ AuthService ~ verifyEmail ~ user:", user)
       if (!user) {
         return { success: false, error: 'Invalid verification token' };
       }
@@ -737,13 +786,34 @@ export class AuthService {
 
       if (!verification.valid || !verification.user) {
         return { user: null, error: verification.error || 'Invalid token' };
-      }
-
-      return { user: verification.user };
+      }      return { user: verification.user };
     } catch (error) {
       console.error('Auth validation error:', error);
       return { user: null, error: 'Authentication failed' };
     }
+  }
+
+  /**
+   * Determine user role based on user data
+   * Since the database doesn't have a role field, we use business logic to determine roles
+   */
+  private static determineUserRole(user: User): 'user' | 'admin' {
+    // For now, we'll use a simple logic - this can be extended later
+    // Option 1: Check if user is active (current pattern in codebase)
+    // Option 2: Check specific admin emails
+    // Option 3: Add role field to database schema
+    
+    // Currently using the same pattern as isAdminUser in monitoring route
+    // where active users are considered admins for admin endpoints
+    // This is a placeholder - in production you'd want proper role management
+    
+    // For security, default to 'user' role
+    // You can extend this logic based on your requirements:
+    // - Check against a list of admin emails
+    // - Check user permissions in database
+    // - Use external role management system
+    
+    return 'user'; // Default to user role for security
   }
 }
 
@@ -799,8 +869,7 @@ export class LegacyAuthService {
     } catch (error) {
       console.error('Legacy token verification error:', error);
       return null;
-    }
-  }
+    }  }
 }
 
 export default AuthService;

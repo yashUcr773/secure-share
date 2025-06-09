@@ -21,29 +21,55 @@ export default function AuthenticatedLogin() {
   const { login } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-
   // Check for success messages from URL parameters
   useEffect(() => {
     const verified = searchParams.get('verified');
     const reset = searchParams.get('reset');
+    const expired = searchParams.get('expired');
     
     if (verified === 'true') {
       setSuccessMessage("Email verified successfully! You can now log in to your account.");
     } else if (reset === 'success') {
-      setSuccessMessage("Password reset successfully! You can now log in with your new password.");
+      setSuccessMessage("Password reset successfully! You can now log in with your new password.");    } else if (expired === 'true') {
+      setError("Your session has expired. Please log in again.");
+      // Clear any existing auth tokens to prevent further issues
+      document.cookie = 'auth-token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+      document.cookie = 'refresh-token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+      // Also clear session storage items that might interfere
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem('csrf-token');
+          localStorage.removeItem('auth-token');
+        } catch (e) {
+          console.log("🚀 ~ useEffect ~ e:", e)
+          // Ignore storage errors
+        }
+      }
     }
   }, [searchParams]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError("");
+    setSuccessMessage(""); // Clear any previous success messages
     
     try {
       const result = await login(email, password);
       
       if (result.success) {
-        router.push("/dashboard");
+        // Clear URL parameters and any expired session state
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          if (url.searchParams.has('expired')) {
+            url.searchParams.delete('expired');
+            window.history.replaceState({}, '', url.pathname + url.search);
+          }
+        }
+        
+        // Give a small delay to ensure login state is properly set
+        setTimeout(() => {
+          router.push("/dashboard");
+        }, 100);
       } else {
         setError(result.error || "Login failed");
       }

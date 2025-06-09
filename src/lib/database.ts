@@ -125,13 +125,19 @@ export class SessionService {
     token: string;
     expiresAt: Date;
   }): Promise<Session> {
-    return prisma.session.create({
+    console.log('🔧 [SESSION DEBUG] Creating session:', data);
+    const session = await prisma.session.create({
       data,
     });
+    console.log('✅ [SESSION DEBUG] Session created:', session);
+    return session;
   }
 
   static async getValidSession(token: string): Promise<Session | null> {
-    return prisma.session.findFirst({
+    console.log('🔧 [SESSION DEBUG] Looking for valid session with token:', token);
+    console.log('🔧 [SESSION DEBUG] Current time:', new Date());
+    
+    const session = await prisma.session.findFirst({
       where: {
         token,
         isRevoked: false,
@@ -143,6 +149,40 @@ export class SessionService {
         user: true,
       },
     });
+    
+    if (session) {
+      console.log('✅ [SESSION DEBUG] Valid session found:', {
+        id: session.id,
+        userId: session.userId,
+        token: session.token,
+        isRevoked: session.isRevoked,
+        expiresAt: session.expiresAt,
+        createdAt: session.createdAt
+      });
+    } else {
+      console.log('❌ [SESSION DEBUG] No valid session found');
+      
+      // Let's check if the session exists but doesn't meet criteria
+      const anySession = await prisma.session.findFirst({
+        where: { token }
+      });
+      
+      if (anySession) {
+        console.log('🔧 [SESSION DEBUG] Session exists but invalid:', {
+          id: anySession.id,
+          userId: anySession.userId,
+          token: anySession.token,
+          isRevoked: anySession.isRevoked,
+          expiresAt: anySession.expiresAt,
+          createdAt: anySession.createdAt,
+          isExpired: anySession.expiresAt < new Date()
+        });
+      } else {
+        console.log('🔧 [SESSION DEBUG] Session does not exist at all');
+      }
+    }
+    
+    return session;
   }
 
   static async revokeSession(token: string): Promise<void> {

@@ -45,41 +45,69 @@ export async function middleware(request: NextRequest) {
     
     return response;
   }
-
   // Protected routes that require authentication
   const protectedRoutes = ['/dashboard', '/upload'];
   
-  // Auth routes that should redirect if already authenticated
-  const authRoutes = ['/auth/login', '/auth/signup'];
+  // All auth-related routes that don't need authentication checks
+  const allAuthRoutes = ['/auth/login', '/auth/signup', '/auth/verify-email', '/auth/forgot-password', '/auth/reset-password'];
+  
   const token = request.cookies.get('auth-token')?.value;
+  
+  console.log('🔧 [MIDDLEWARE DEBUG] Processing request for:', pathname);
+  console.log('🔧 [MIDDLEWARE DEBUG] Token present:', !!token);
 
   // Check if the current path is protected
   if (protectedRoutes.some(route => pathname.startsWith(route))) {
+    console.log('🔧 [MIDDLEWARE DEBUG] Accessing protected route:', pathname);
+    
     if (!token) {
-      // Redirect to login if no token
-      return NextResponse.redirect(new URL('/auth/login', request.url));
-    }
-
-    try {
-      // Verify token
-      const payload = await EdgeAuthService.verifyToken(token);
-      if (!payload) {
-        // Invalid token, redirect to login
-        const response = NextResponse.redirect(new URL('/auth/login', request.url));
+      console.log('❌ [MIDDLEWARE DEBUG] No token found, redirecting to login');
+      // Redirect to login if no token, but avoid redirect loop
+      if (pathname !== '/auth/login') {
+        return NextResponse.redirect(new URL('/auth/login', request.url));
+      }
+    } else {
+      console.log('🔧 [MIDDLEWARE DEBUG] Token found, verifying...');
+      try {
+        // Verify token
+        const payload = await EdgeAuthService.verifyToken(token);
+        if (!payload) {
+          console.log('❌ [MIDDLEWARE DEBUG] Token verification failed - no payload');
+          // Invalid token, redirect to login with expired flag only if not coming from login
+          const referer = request.headers.get('referer');
+          const isFromLogin = referer && referer.includes('/auth/login');
+          
+          console.log('🔧 [MIDDLEWARE DEBUG] Referer:', referer, 'isFromLogin:', isFromLogin);
+          
+          const redirectUrl = isFromLogin 
+            ? new URL('/auth/login', request.url)
+            : new URL('/auth/login?expired=true', request.url);
+          
+          const response = NextResponse.redirect(redirectUrl);
+          response.cookies.delete('auth-token');
+          response.cookies.delete('refresh-token');
+          return response;
+        }
+        console.log('✅ [MIDDLEWARE DEBUG] Token verification successful for user:', payload.userId);
+      } catch (error) {
+        console.error('❌ [MIDDLEWARE DEBUG] Token verification failed:', error);
+        // Token verification failed, redirect to login with expired flag only if not coming from login
+        const referer = request.headers.get('referer');
+        const isFromLogin = referer && referer.includes('/auth/login');
+        
+        const redirectUrl = isFromLogin 
+          ? new URL('/auth/login', request.url)
+          : new URL('/auth/login?expired=true', request.url);
+        
+        const response = NextResponse.redirect(redirectUrl);
         response.cookies.delete('auth-token');
+        response.cookies.delete('refresh-token');
         return response;
       }
-    } catch (error) {
-      console.error('Token verification failed:', error);
-      // Token verification failed, redirect to login
-      const response = NextResponse.redirect(new URL('/auth/login', request.url));
-      response.cookies.delete('auth-token');
-      return response;
     }
   }
-
-  // Check if the current path is an auth route
-  if (authRoutes.some(route => pathname.startsWith(route))) {
+  // Check if the current path is an auth route that should redirect if authenticated
+  if (allAuthRoutes.some(route => pathname.startsWith(route))) {
     if (token) {
       try {
         // Verify token
@@ -92,7 +120,8 @@ export async function middleware(request: NextRequest) {
         console.error('Token verification failed:', error);
         // Token is invalid, clear it and continue
         const response = NextResponse.next();
-        response.cookies.delete('auth-token');        return response;
+        response.cookies.delete('auth-token');
+        return response;
       }
     }
   }

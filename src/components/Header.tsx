@@ -25,8 +25,8 @@ export function Header() {
   useEffect(() => {
     setMounted(true);
   }, []);
-
   const isAuthPage = pathname?.startsWith('/auth');
+  const isVerificationPage = pathname === '/auth/verify-email';
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -42,8 +42,8 @@ export function Header() {
           {/* Theme Toggle - Always visible */}
           <ThemeToggle />
           
-          {/* Auth-dependent navigation */}
-          {mounted ? (
+          {/* Auth-dependent navigation - Skip on verification page to prevent auth context issues */}
+          {mounted && !isVerificationPage ? (
             <AuthenticatedHeader isAuthPage={isAuthPage} pathname={pathname} />
           ) : (
             <div className="w-20 h-9 bg-muted animate-pulse rounded"></div>
